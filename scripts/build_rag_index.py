@@ -1,74 +1,80 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-RAG索引构建脚本
-读取data/文件夹中的所有文档，构建向量索引并保存到storage/文件夹
+"""Build a LlamaIndex vector index for LocalRAGRetriever.
+
+This script reads files under ``data/`` and builds a persistent LlamaIndex
+vector store to the directory configured via ``LLAMA_PERSIST_DIR`` (defaults to
+``storage/llama_index``). It uses a Hugging Face embedding model so everything
+can run locally without external paid services.
 """
 
-import os
-import sys
+from __future__ import annotations
+
+import argparse
 from pathlib import Path
-from typing import List
+import sys
 
-# 添加项目根目录到路径
-project_root = Path(__file__).parent.parent
-sys.path.append(str(project_root))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from config import Config
-from src.preprocessing.parser import DocumentParser
+from config import get_settings
 
 
-class RAGIndexBuilder:
-    """RAG索引构建器"""
+def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for index construction."""
+    parser = argparse.ArgumentParser(description="Build LlamaIndex (vector) for local RAG.")
+    parser.add_argument("--data-dir", type=Path, help="Directory containing raw documents.")
+    parser.add_argument(
+        "--persist-dir",
+        type=Path,
+        help="Directory to persist the LlamaIndex (defaults to settings.llama_index_dir)",
+    )
+    parser.add_argument(
+        "--embedding-model",
+        type=str,
+        help="HF embedding model name (defaults to settings.llama_embedding_model)",
+    )
+    return parser.parse_args()
 
-    def __init__(self):
-        self.config = Config()
-        self.parser = DocumentParser()
-        self.data_dir = project_root / "data"
-        self.storage_dir = project_root / "storage"
 
-        # 确保storage目录存在
-        self.storage_dir.mkdir(exist_ok=True)
+def main() -> None:
+    """Build and persist a LlamaIndex vector store from local documents."""
+    args = parse_args()
+    settings = get_settings()
 
-    def scan_documents(self) -> List[Path]:
-        """扫描data目录中的所有文档"""
-        documents = []
-        for file_path in self.data_dir.rglob("*"):
-            if file_path.is_file() and not file_path.name.startswith('.'):
-                documents.append(file_path)
-        return documents
+    data_dir = (args.data_dir or settings.data_dir).resolve()
+    persist_dir = (args.persist_dir or settings.llama_index_dir).resolve()
+    model_name = args.embedding_model or settings.llama_embedding_model
 
-    def build_index(self):
-        """构建向量索引"""
-        print("开始构建RAG索引...")
+    if persist_dir.exists():
+        import shutil
 
-        # 扫描文档
-        documents = self.scan_documents()
-        print(f"发现 {len(documents)} 个文档")
+        shutil.rmtree(persist_dir)
+    persist_dir.mkdir(parents=True, exist_ok=True)
 
-        # 解析文档内容
-        all_texts = []
-        for doc_path in documents:
-            print(f"处理文档: {doc_path.name}")
-            try:
-                text = self.parser.parse_document(str(doc_path))
-                if text.strip():
-                    all_texts.append(text)
-            except Exception as e:
-                print(f"处理文档 {doc_path.name} 时出错: {e}")
+    # Lazy imports to keep base runtime light
+    from llama_index.core import SimpleDirectoryReader, StorageContext, VectorStoreIndex
+    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
-        # TODO: 在这里添加向量化和索引构建逻辑
-        # 例如使用 FAISS, ChromaDB 或其他向量数据库
+    print(f"Building LlamaIndex from {data_dir} with model {model_name} -> {persist_dir}")
+    documents = SimpleDirectoryReader(str(data_dir)).load_data()
+    if not documents:
+        raise RuntimeError(f"No documents discovered in {data_dir}.")
 
-        print(f"成功处理 {len(all_texts)} 个文档")
-        print("RAG索引构建完成！")
+    embed_model = HuggingFaceEmbedding(model_name=model_name)
+    storage_context = StorageContext.from_defaults()
+    index = VectorStoreIndex.from_documents(
+        documents,
+        storage_context=storage_context,
+        embed_model=embed_model,
+    )
+    index.storage_context.persist(persist_dir=str(persist_dir))
 
-    def update_index(self, file_path: str):
-        """更新单个文件的索引"""
-        print(f"更新文档索引: {file_path}")
-        # TODO: 实现增量更新逻辑
+    print(f"Indexed {len(documents)} documents.")
+    print(f"Index persisted to {persist_dir}")
+
+
+
 
 
 if __name__ == "__main__":
-    builder = RAGIndexBuilder()
-    builder.build_index()
+    main()

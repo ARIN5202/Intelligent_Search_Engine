@@ -1,182 +1,109 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-金融数据检索器
-获取股票、汇率等金融信息
-"""
+"""Finance retriever leveraging APIs such as AlphaVantage."""
 
-import asyncio
-from typing import List, Dict, Any
-from .base_retriever import BaseRetriever
+from __future__ import annotations
+
+from typing import Any, Dict, Mapping, Optional
+import requests
+
+from config import Settings
+from .base_retriever import BaseRetriever, RetrievedDocument
 
 
 class FinanceRetriever(BaseRetriever):
-    """金融数据检索器"""
+    """Fetch live market data for equities or indices."""
 
-    def __init__(self):
-        super().__init__("Finance")
-        self.description = "金融数据检索器，获取股票价格、汇率等金融信息"
-        self.api_key = None
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        session: Optional[requests.Session] = None,
+        default_function: str = "GLOBAL_QUOTE",
+    ) -> None:
+        super().__init__(name="finance", settings=settings)
+        self._session = session or requests.Session()
+        self._default_function = default_function
 
-    async def _do_initialize(self):
-        """初始化金融API"""
-        print("金融检索器初始化完成")
+    def _retrieve(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        symbol: Optional[str] = None,
+        function: Optional[str] = None,
+        params: Optional[Mapping[str, Any]] = None,
+        **_: Any,
+    ):
+        """Query Alpha Vantage for a quote and map the response to the unified schema."""
+        ticker = (symbol or query).strip().upper()
+        if not ticker:
+            raise ValueError("A ticker symbol is required for finance queries.")
 
-    async def retrieve(self, query: str, top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
-        """
-        获取金融信息
+        url = self.settings.finance_api_url
+        api_key = self.settings.finance_api_key
+        if not api_key:
+            raise RuntimeError(
+                "Finance API key missing. Set FINANCE_API_KEY in the environment."
+            )
 
-        Args:
-            query: 查询内容
-            top_k: 返回结果数量
+        function_name = (function or self._default_function).strip()
 
-        Returns:
-            金融信息结果列表
-        """
-        if not self.is_initialized:
-            await self.initialize()
+        request_params: Dict[str, Any] = {"function": function_name, "symbol": ticker, "apikey": api_key}
+        if params:
+            request_params.update(params)
 
-        try:
-            results = []
+        response = self._session.get(
+            url,
+            params=request_params,
+            timeout=self.settings.request_timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
 
-            # 根据查询类型获取不同的金融数据
-            if any(keyword in query.lower() for keyword in ['股票', '股价', '股市']):
-                stock_data = await self._get_stock_data(query)
-                results.extend(stock_data)
-
-            if any(keyword in query.lower() for keyword in ['汇率', '外汇', '美元', '欧元']):
-                exchange_data = await self._get_exchange_data(query)
-                results.extend(exchange_data)
-
-            if any(keyword in query.lower() for keyword in ['黄金', '原油', '期货']):
-                commodity_data = await self._get_commodity_data(query)
-                results.extend(commodity_data)
-
-            return results[:top_k]
-
-        except Exception as e:
-            print(f"金融数据获取失败: {e}")
-            return []
-
-    async def _get_stock_data(self, query: str) -> List[Dict[str, Any]]:
-        """获取股票数据（模拟实现）"""
-        await asyncio.sleep(0.1)
-
-        # 模拟股票数据
-        stock_info = {
-            'symbol': 'AAPL',
-            'name': '苹果公司',
-            'price': 150.25,
-            'change': 2.35,
-            'change_percent': 1.59,
-            'volume': 50000000,
-            'market_cap': '2.4T'
+        document = self._build_document(ticker, payload)
+        metadata = {
+            "requested_symbol": ticker,
+            "function": function_name,
         }
+        return [document], metadata
 
-        content = f"""
-股票信息：{stock_info['name']} ({stock_info['symbol']})
-- 当前价格：${stock_info['price']}
-- 涨跌额：${stock_info['change']} ({stock_info['change_percent']:+.2f}%)
-- 成交量：{stock_info['volume']:,}
-- 市值：{stock_info['market_cap']}
-        """
+    @staticmethod
+    def _build_document(symbol: str, payload: Mapping[str, Any]) -> RetrievedDocument:
+        """Convert the quote response into a standardised document."""
+        quote = FinanceRetriever._extract_quote(payload)
+        if not quote:
+            raise RuntimeError(f"Finance API response did not contain quote data for {symbol}.")
 
-        result = self._format_result(
-            content=content.strip(),
-            title=f"{stock_info['name']}股票信息",
-            source="金融数据API",
-            score=0.9,
-            metadata={
-                'symbol': stock_info['symbol'],
-                'price': stock_info['price'],
-                'change': stock_info['change'],
-                'data_type': 'stock',
-                'retrieval_method': 'finance_api'
-            }
+        price = quote.get("price") or quote.get("05. price")
+        change = quote.get("change") or quote.get("09. change")
+        percent_change = quote.get("change_percent") or quote.get("10. change percent")
+
+        lines = [f"Symbol: {symbol}"]
+        if price:
+            lines.append(f"Price: {price}")
+        if change:
+            lines.append(f"Change: {change}")
+        if percent_change:
+            lines.append(f"Change %: {percent_change}")
+
+        content = "\n".join(lines)
+
+        return RetrievedDocument(
+            content=content or f"Quote data for {symbol}",
+            source="finance",
+            score=1.0,
+            metadata={"raw": payload},
         )
 
-        return [result]
+    @staticmethod
+    def _extract_quote(payload: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
+        """Find the quote dictionary inside various Alpha Vantage response shapes."""
+        for key in ("Global Quote", "Quote", "data"):
+            value = payload.get(key)
+            if isinstance(value, Mapping):
+                return value  # type: ignore[return-value]
+        if isinstance(payload, Mapping):
+            return payload  # type: ignore[return-value]
+        return None
 
-    async def _get_exchange_data(self, query: str) -> List[Dict[str, Any]]:
-        """获取汇率数据（模拟实现）"""
-        await asyncio.sleep(0.1)
 
-        # 模拟汇率数据
-        exchange_rates = [
-            {'from': 'USD', 'to': 'CNY', 'rate': 7.25, 'change': 0.05},
-            {'from': 'EUR', 'to': 'CNY', 'rate': 7.89, 'change': -0.02},
-            {'from': 'GBP', 'to': 'CNY', 'rate': 9.15, 'change': 0.08}
-        ]
-
-        results = []
-        for rate_info in exchange_rates:
-            content = f"""
-汇率信息：{rate_info['from']}/{rate_info['to']}
-- 当前汇率：{rate_info['rate']:.4f}
-- 涨跌：{rate_info['change']:+.4f}
-- 更新时间：实时
-            """
-
-            result = self._format_result(
-                content=content.strip(),
-                title=f"{rate_info['from']}/{rate_info['to']}汇率",
-                source="汇率API",
-                score=0.85,
-                metadata={
-                    'from_currency': rate_info['from'],
-                    'to_currency': rate_info['to'],
-                    'rate': rate_info['rate'],
-                    'data_type': 'exchange_rate',
-                    'retrieval_method': 'finance_api'
-                }
-            )
-            results.append(result)
-
-        return results
-
-    async def _get_commodity_data(self, query: str) -> List[Dict[str, Any]]:
-        """获取大宗商品数据（模拟实现）"""
-        await asyncio.sleep(0.1)
-
-        # 模拟商品数据
-        commodities = [
-            {'name': '黄金', 'price': 1950.50, 'unit': 'USD/盎司', 'change': 12.30},
-            {'name': '原油', 'price': 85.75, 'unit': 'USD/桶', 'change': -1.25},
-            {'name': '白银', 'price': 24.80, 'unit': 'USD/盎司', 'change': 0.45}
-        ]
-
-        results = []
-        for commodity in commodities:
-            content = f"""
-大宗商品：{commodity['name']}
-- 当前价格：{commodity['price']} {commodity['unit']}
-- 涨跌：{commodity['change']:+.2f}
-- 市场状态：活跃交易
-            """
-
-            result = self._format_result(
-                content=content.strip(),
-                title=f"{commodity['name']}价格信息",
-                source="商品期货API",
-                score=0.8,
-                metadata={
-                    'commodity': commodity['name'],
-                    'price': commodity['price'],
-                    'unit': commodity['unit'],
-                    'data_type': 'commodity',
-                    'retrieval_method': 'finance_api'
-                }
-            )
-            results.append(result)
-
-        return results
-
-    async def health_check(self) -> bool:
-        """健康检查"""
-        try:
-            # 测试获取股票信息
-            results = await self.retrieve("股票价格", top_k=1)
-            return len(results) > 0
-        except Exception as e:
-            print(f"金融检索器健康检查失败: {e}")
-            return False
+__all__ = ["FinanceRetriever"]

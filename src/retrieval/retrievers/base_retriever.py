@@ -1,136 +1,95 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-基础检索器接口
-定义所有检索器必须实现的接口规范
-"""
+"""Common abstractions shared by all retrieval backends."""
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+import time
+
+from config import Settings
+
+
+@dataclass(slots=True)
+class RetrievedDocument:
+    """Represents a single piece of content returned by a retriever."""
+
+    content: str
+    source: str
+    score: float
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class RetrievalResult:
+    """Standardised container for retriever responses."""
+
+    query: str
+    documents: List[RetrievedDocument]
+    provider: str
+    latency: Optional[float] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class BaseRetriever(ABC):
-    """检索器基类，定义统一接口"""
+    """Interface every retriever implementation must follow."""
 
-    def __init__(self, name: str = "BaseRetriever"):
-        """
-        初始化检索器
-
-        Args:
-            name: 检索器名称
-        """
+    def __init__(self, name: str, settings: Settings) -> None:
         self.name = name
-        self.description = "基础检索器"
-        self.is_initialized = False
+        self.settings = settings
+
+    def __call__(self, query: str, **kwargs: Any) -> RetrievalResult:
+        return self.retrieve(query, **kwargs)
+
+    def retrieve(
+        self,
+        query: str,
+        *,
+        top_k: int = 5,
+        **kwargs: Any,
+    ) -> RetrievalResult:
+        """Validate inputs, measure latency, and delegate to subclass-specific logic."""
+        """Execute the retrieval and wrap the result in ``RetrievalResult``."""
+        clean_query = query.strip()
+        if not clean_query:
+            raise ValueError("Query must be a non-empty string.")
+
+        top_k = self._validate_top_k(top_k)
+
+        start = time.perf_counter()
+        documents, metadata = self._retrieve(
+            clean_query,
+            top_k=top_k,
+            **kwargs,
+        )
+        elapsed = time.perf_counter() - start
+
+        return RetrievalResult(
+            query=clean_query,
+            documents=documents[:top_k],
+            provider=self.name,
+            latency=elapsed,
+            metadata=metadata or {},
+        )
 
     @abstractmethod
-    async def retrieve(self, query: str, top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
-        """
-        检索相关信息
+    def _retrieve(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        **kwargs: Any,
+    ) -> Tuple[List[RetrievedDocument], Dict[str, Any]]:
+        """Perform backend-specific retrieval and return documents plus metadata."""
 
-        Args:
-            query: 查询内容
-            top_k: 返回结果数量
-            **kwargs: 其他参数
+    def _validate_top_k(self, value: int) -> int:
+        if value <= 0:
+            raise ValueError("top_k must be a positive integer.")
+        return min(value, 50)
 
-        Returns:
-            检索结果列表，每个结果包含:
-            - content: 内容文本
-            - title: 标题（可选）
-            - source: 来源（可选）
-            - score: 相关性分数（可选）
-            - metadata: 其他元数据（可选）
-        """
-        pass
 
-    @abstractmethod
-    async def health_check(self) -> bool:
-        """
-        健康检查
-
-        Returns:
-            检索器是否正常工作
-        """
-        pass
-
-    async def initialize(self) -> bool:
-        """
-        初始化检索器
-
-        Returns:
-            是否初始化成功
-        """
-        try:
-            await self._do_initialize()
-            self.is_initialized = True
-            return True
-        except Exception as e:
-            print(f"检索器 {self.name} 初始化失败: {e}")
-            self.is_initialized = False
-            return False
-
-    async def _do_initialize(self):
-        """子类可重写的初始化逻辑"""
-        pass
-
-    def _format_result(self, content: str, title: str = "", source: str = "", score: float = 0.0,
-                       metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        格式化检索结果
-
-        Args:
-            content: 内容文本
-            title: 标题
-            source: 来源
-            score: 相关性分数
-            metadata: 其他元数据
-
-        Returns:
-            格式化后的结果字典
-        """
-        result = {
-            'content': content.strip(),
-            'title': title.strip(),
-            'source': source.strip(),
-            'score': max(0.0, min(1.0, score)),  # 确保分数在0-1之间
-            'metadata': metadata or {}
-        }
-
-        # 添加时间戳
-        import time
-        result['retrieved_at'] = time.time()
-        result['retriever_name'] = self.name
-
-        return result
-
-    def _extract_keywords(self, query: str) -> List[str]:
-        """
-        从查询中提取关键词
-
-        Args:
-            query: 查询内容
-
-        Returns:
-            关键词列表
-        """
-        # 简单的关键词提取（实际项目中可以使用更复杂的NLP方法）
-        import re
-
-        # 移除标点符号并分词
-        words = re.findall(r'\b\w+\b', query.lower())
-
-        # 过滤停用词
-        stop_words = {'的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很',
-                      '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这'}
-        keywords = [word for word in words if word not in stop_words and len(word) > 1]
-
-        return keywords
-
-    async def update_config(self, config: Dict[str, Any]):
-        """
-        更新配置（子类可重写）
-
-        Args:
-            config: 新配置
-        """
-        print(f"检索器 {self.name} 配置已更新: {config}")
+__all__ = [
+    "BaseRetriever",
+    "RetrievedDocument",
+    "RetrievalResult",
+]

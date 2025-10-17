@@ -1,215 +1,165 @@
+"""全局配置工具。
+
+核心环境变量（可在 ``.env`` 中配置）：
+
+- BASE_DIR, DATA_DIR, STORAGE_DIR, RAG_INDEX_FILE
+- REQUEST_TIMEOUT, USER_AGENT
+- WEB_SEARCH_API_URL / WEB_SEARCH_API_KEY
+- WEATHER_API_URL / WEATHER_API_KEY
+- FINANCE_API_URL / FINANCE_API_KEY / FINANCE_PROVIDER
+- TRANSPORT_API_URL / TRANSPORT_API_KEY
+
+模块通过 ``Settings`` 数据类对上述变量统一封装，并提供 ``get_settings`` 缓存访问。
 """
-配置管理模块
-从环境变量和.env文件中读取配置
-"""
+
+from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
+
+_DEFAULT_ENV_FILENAMES = (".env",)
 
 
-def _load_env_file():
-    """加载.env文件"""
-    env_file = Path(__file__).parent / '.env'
+def _load_env_file(path: Path) -> None:
+    """Populate ``os.environ`` with key/value pairs from ``path`` if present.
 
-    if env_file.exists():
-        try:
-            with open(env_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
-                        key, value = line.split('=', 1)
-                        # 只有在环境变量中不存在时才设置
-                        if key.strip() not in os.environ:
-                            os.environ[key.strip()] = value.strip()
-        except Exception as e:
-            print(f"加载.env文件失败: {e}")
-    else:
-        print("未找到.env文件，将使用默认配置")
-
-
-def get(key: str, default: Optional[str] = None) -> Optional[str]:
+    Only lines in ``KEY=VALUE`` form are considered. Existing environment
+    variables are never overwritten, making it safe to call multiple times.
     """
-    获取配置值
+    if not path.exists() or not path.is_file():
+        return
 
-    Args:
-        key: 配置项名称
-        default: 默认值
-
-    Returns:
-        配置值或默认值
-    """
-    return os.environ.get(key, default)
+    for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip())
 
 
-def get_int(key: str, default: int = 0) -> int:
-    """
-    获取整数配置值
+def load_environment(env_file: Optional[Path | str] = None) -> None:
+    """Load environment variables from ``env_file`` or the default candidates."""
+    if env_file is not None:
+        _load_env_file(Path(env_file))
+        return
 
-    Args:
-        key: 配置项名称
-        default: 默认值
+    for filename in _DEFAULT_ENV_FILENAMES:
+        _load_env_file(Path(filename))
 
-    Returns:
-        整数配置值
-    """
-    value = get(key)
-    if value is None:
-        return default
 
+def _to_path(value: Optional[str], fallback: Path) -> Path:
+    return Path(value).expanduser().resolve() if value else fallback
+
+
+def _to_float(value: Optional[str], fallback: float) -> float:
     try:
-        return int(value)
+        return float(value) if value is not None else fallback
     except ValueError:
-        print(f"配置项 {key} 的值 '{value}' 不是有效整数，使用默认值 {default}")
-        return default
+        return fallback
 
 
-def get_bool(key: str, default: bool = False) -> bool:
-    """
-    获取布尔配置值
+@dataclass(frozen=True)
+class Settings:
+    """Container object holding all runtime configuration values."""
 
-    Args:
-        key: 配置项名称
-        default: 默认值
+    base_dir: Path
+    data_dir: Path
+    storage_dir: Path
+    rag_index_file: Path
+    llama_index_dir: Path
+    request_timeout: float
 
-    Returns:
-        布尔配置值
-    """
-    value = get(key, '').lower()
-    if value in ('true', '1', 'yes', 'on'):
-        return True
-    elif value in ('false', '0', 'no', 'off'):
-        return False
-    else:
-        return default
+    web_search_api_url: Optional[str]
+    web_search_api_key: Optional[str]
+    web_search_api_method: str
+    web_search_auth_header: str
+    web_search_auth_prefix: str
 
+    weather_api_url: str
+    weather_api_key: Optional[str]
 
-def get_list(key: str, separator: str = ',', default: Optional[list] = None) -> list:
-    """
-    获取列表配置值
+    finance_api_url: str
+    finance_api_key: Optional[str]
 
-    Args:
-        key: 配置项名称
-        separator: 分隔符
-        default: 默认值
+    transport_api_url: Optional[str]
+    transport_api_key: Optional[str]
 
-    Returns:
-        列表配置值
-    """
-    value = get(key)
-    if value is None:
-        return default or []
+    user_agent: str
+    llama_embedding_model: Optional[str]
+    llama_device: Optional[str]
 
-    return [item.strip() for item in value.split(separator) if item.strip()]
+    @classmethod
+    def from_env(cls, env_file: Optional[Path | str] = None) -> "Settings":
+        """Build a ``Settings`` instance using environment variables."""
+        load_environment(env_file)
 
+        base_dir = _to_path(
+            os.environ.get("BASE_DIR"),
+            Path(__file__).resolve().parent,
+        )
+        data_dir = _to_path(os.environ.get("DATA_DIR"), base_dir / "data")
+        storage_dir = _to_path(os.environ.get("STORAGE_DIR"), base_dir / "storage")
 
-def _validate_config():
-    """验证必要的配置项"""
-    required_keys = [
-        'OPENAI_API_KEY',
-        'SEARCH_API_KEY'
-    ]
+        rag_index = _to_path(
+            os.environ.get("RAG_INDEX_FILE"),
+            storage_dir / "local_rag_index.json",
+        )
+        llama_dir = _to_path(
+            os.environ.get("LLAMA_PERSIST_DIR"),
+            storage_dir / "llama_index",
+        )
 
-    missing_keys = []
-    for key in required_keys:
-        if not get(key):
-            missing_keys.append(key)
+        return cls(
+            base_dir=base_dir,
+            data_dir=data_dir,
+            storage_dir=storage_dir,
+            rag_index_file=rag_index,
+            llama_index_dir=llama_dir,
+            request_timeout=_to_float(os.environ.get("REQUEST_TIMEOUT"), 10.0),
+            web_search_api_url=os.environ.get("WEB_SEARCH_API_URL"),
+            web_search_api_key=os.environ.get("WEB_SEARCH_API_KEY"),
+            web_search_api_method=os.environ.get("WEB_SEARCH_API_METHOD", "GET").upper(),
+            web_search_auth_header=os.environ.get("WEB_SEARCH_AUTH_HEADER", "Authorization"),
+            web_search_auth_prefix=os.environ.get("WEB_SEARCH_AUTH_PREFIX", "Bearer "),
+            weather_api_url=os.environ.get(
+                "WEATHER_API_URL", "https://api.openweathermap.org/data/2.5/weather"
+            ),
+            weather_api_key=os.environ.get("WEATHER_API_KEY"),
+            finance_api_url=os.environ.get(
+                "FINANCE_API_URL", "https://www.alphavantage.co/query"
+            ),
+            finance_api_key=os.environ.get("FINANCE_API_KEY"),
+            transport_api_url=os.environ.get("TRANSPORT_API_URL"),
+            transport_api_key=os.environ.get("TRANSPORT_API_KEY"),
+            user_agent=os.environ.get("USER_AGENT", "IntelligentSearchEngine/1.0"),
+            llama_embedding_model=os.environ.get(
+                "LLAMA_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+            ),
+            llama_device=os.environ.get("LLAMA_DEVICE"),
+        )
 
-    if missing_keys:
-        print(f"警告：缺少以下配置项: {', '.join(missing_keys)}")
-        print("某些功能可能无法正常工作，请在.env文件中配置相应的API密钥")
-
-
-class Config:
-    """配置管理器"""
-
-    def __init__(self):
-        """初始化配置"""
-        _load_env_file()
-        _validate_config()
-
-    # 便捷方法获取常用配置
-    @property
-    def openai_api_key(self) -> Optional[str]:
-        """OpenAI API密钥"""
-        return get('OPENAI_API_KEY')
-
-    @property
-    def openai_base_url(self) -> str:
-        """OpenAI API基础URL"""
-        return get('OPENAI_BASE_URL', 'https://api.openai.com/v1')
-
-    @property
-    def search_api_key(self) -> Optional[str]:
-        """搜索API密钥"""
-        return get('SEARCH_API_KEY')
-
-    @property
-    def weather_api_key(self) -> Optional[str]:
-        """天气API密钥"""
-        return get('WEATHER_API_KEY')
-
-    @property
-    def finance_api_key(self) -> Optional[str]:
-        """金融API密钥"""
-        return get('FINANCE_API_KEY')
-
-    @property
-    def maps_api_key(self) -> Optional[str]:
-        """地图API密钥"""
-        return get('MAPS_API_KEY')
-
-    @property
-    def vector_db_url(self) -> str:
-        """向量数据库URL"""
-        return get('VECTOR_DB_URL', 'localhost:6333')
-
-    @property
-    def log_level(self) -> str:
-        """日志级别"""
-        return get('LOG_LEVEL', 'INFO')
-
-    @property
-    def max_retrieval_results(self) -> int:
-        """最大检索结果数"""
-        return get_int('MAX_RETRIEVAL_RESULTS', 50)
-
-    @property
-    def default_top_k(self) -> int:
-        """默认返回结果数"""
-        return get_int('DEFAULT_TOP_K', 10)
-
-    @property
-    def response_timeout(self) -> int:
-        """响应超时时间（秒）"""
-        return get_int('RESPONSE_TIMEOUT', 30)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """将配置转换为字典"""
-        return {
-            'openai_api_key': self.openai_api_key,
-            'openai_base_url': self.openai_base_url,
-            'search_api_key': self.search_api_key,
-            'weather_api_key': self.weather_api_key,
-            'finance_api_key': self.finance_api_key,
-            'maps_api_key': self.maps_api_key,
-            'vector_db_url': self.vector_db_url,
-            'log_level': self.log_level,
-            'max_retrieval_results': self.max_retrieval_results,
-            'default_top_k': self.default_top_k,
-            'response_timeout': self.response_timeout
-        }
-
-    def __str__(self) -> str:
-        """字符串表示（隐藏敏感信息）"""
-        config_dict = self.to_dict()
-        # 隐藏API密钥
-        for key in config_dict:
-            if 'key' in key.lower() and config_dict[key]:
-                config_dict[key] = f"{config_dict[key][:8]}..."
-
-        return f"Config({config_dict})"
+    def ensure_directories(self) -> None:
+        """Create storage-related directories if they do not yet exist."""
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
 
 
-# 全局配置实例
-config = Config()
+_SETTINGS_CACHE: Optional[Settings] = None
+
+
+def get_settings(env_file: Optional[Path | str] = None) -> Settings:
+    """Return cached ``Settings`` instance, loading it on first access."""
+    global _SETTINGS_CACHE
+
+    if _SETTINGS_CACHE is None or env_file is not None:
+        _SETTINGS_CACHE = Settings.from_env(env_file)
+
+    return _SETTINGS_CACHE
+
+
+__all__ = [
+    "Settings",
+    "get_settings",
+    "load_environment",
+]

@@ -45,6 +45,11 @@ class DummySession:
         )
         return DummyResponse(self.payload)
 
+    def post(self, url, json=None, headers=None, timeout=None):
+        self.requests.append(
+            {"url": url, "json": json, "headers": headers, "timeout": timeout}
+        )
+        return DummyResponse(self.payload)
 
 def make_settings(**overrides):
     return replace(get_settings(), **overrides)

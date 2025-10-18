@@ -33,7 +33,7 @@ class RetrievalManager:
         *,
         auto_register_defaults: bool = True,
     ) -> None:
-        self.settings = settings or get_settings()
+        self.settings = get_settings()
         self.settings.ensure_directories()
 
         self._retrievers: Dict[str, BaseRetriever] = {}

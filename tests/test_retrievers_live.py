@@ -21,8 +21,8 @@ from config import get_settings
 from src.retrieval.manager import RetrievalManager
 
 
-run_live = os.getenv("RUN_LIVE_TESTS") == "1"
-pytestmark = pytest.mark.skipif(not run_live, reason="未设置 RUN_LIVE_TESTS=1，跳过联网集成测试")
+# run_live = os.getenv("RUN_LIVE_TESTS") == "1"
+# pytestmark = pytest.mark.skipif(not run_live, reason="未设置 RUN_LIVE_TESTS=1，跳过联网集成测试")
 
 
 @pytest.fixture(scope="module")
@@ -32,18 +32,24 @@ def manager() -> RetrievalManager:
 
 
 def test_finance_alpha_vantage_live(manager: RetrievalManager) -> None:
-    result = manager.retrieve_finance("AAPL", provider="finance", top_k=1)
+    result = manager.retrieve_finance("NVDA", provider="finance", top_k=1)
+    print(result)
+    print("=" * 40)
     assert result.documents, "Alpha Vantage 应返回至少一条报价"
     time.sleep(15)  # 避免触发免费层速率限制
 
 
 def test_finance_yfinance_live(manager: RetrievalManager) -> None:
-    result = manager.retrieve_finance("AAPL", provider="finance_yf", top_k=1)
+    result = manager.retrieve_finance("NVDA", provider="finance_yf", top_k=1)
+    print(result)
+    print("=" * 40)
     assert result.documents, "yfinance 应返回至少一条报价"
 
 
 def test_weather_openweather_live(manager: RetrievalManager) -> None:
-    result = manager.retrieve("weather", "Hong Kong", units="metric", top_k=1)
+    result = manager.retrieve("weather", "Kunming", units="metric", top_k=1)
+    print(result)
+    print("=" * 40)
     assert "Weather for" in result.documents[0].content
 
 
@@ -55,4 +61,18 @@ def test_transport_google_maps_live(manager: RetrievalManager) -> None:
         mode="transit",
         top_k=1,
     )
+    print(result)
+    print("=" * 40)
     assert result.documents, "Google Maps Directions 应返回至少一条路线"
+
+
+def test_google_search_live(manager: RetrievalManager) -> None:
+    result = manager.retrieve(
+        "web_search",
+        "中国的首都是哪？",
+        top_k=3,
+        params={'gl': 'cn', 'hl': 'zh-CN'}
+    )
+    print(result)
+    print("=" * 40)
+    assert result.documents, "Google search 至少返回三个结果"

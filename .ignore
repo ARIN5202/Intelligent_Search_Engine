@@ -3,3 +3,6 @@
 
 # 忽略 Python 解释器生成的缓存文件
 __pycache__/
+
+# macOS
+.DS_Store

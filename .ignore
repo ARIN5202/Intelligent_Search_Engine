@@ -1,0 +1,5 @@
+# 忽略 JetBrains IDEs (如 PyCharm, IntelliJ) 的项目配置
+.idea/
+
+# 忽略 Python 解释器生成的缓存文件
+__pycache__/

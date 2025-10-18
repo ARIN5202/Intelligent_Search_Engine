@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parent
 _DEFAULT_ENV_FILENAMES = (".env",)
 
 
@@ -46,7 +47,7 @@ def load_environment(env_file: Optional[Path | str] = None) -> None:
         return
 
     for filename in _DEFAULT_ENV_FILENAMES:
-        _load_env_file(Path(filename))
+        _load_env_file(PROJECT_ROOT / filename)
 
 
 def _to_path(value: Optional[str], fallback: Path) -> Path:
@@ -123,20 +124,14 @@ class Settings:
             web_search_api_method=os.environ.get("WEB_SEARCH_API_METHOD", "GET").upper(),
             web_search_auth_header=os.environ.get("WEB_SEARCH_AUTH_HEADER", "Authorization"),
             web_search_auth_prefix=os.environ.get("WEB_SEARCH_AUTH_PREFIX", "Bearer "),
-            weather_api_url=os.environ.get(
-                "WEATHER_API_URL", "https://api.openweathermap.org/data/2.5/weather"
-            ),
+            weather_api_url=os.environ.get("WEATHER_API_URL"),
             weather_api_key=os.environ.get("WEATHER_API_KEY"),
-            finance_api_url=os.environ.get(
-                "FINANCE_API_URL", "https://www.alphavantage.co/query"
-            ),
+            finance_api_url=os.environ.get("FINANCE_API_URL"),
             finance_api_key=os.environ.get("FINANCE_API_KEY"),
             transport_api_url=os.environ.get("TRANSPORT_API_URL"),
             transport_api_key=os.environ.get("TRANSPORT_API_KEY"),
             user_agent=os.environ.get("USER_AGENT", "IntelligentSearchEngine/1.0"),
-            llama_embedding_model=os.environ.get(
-                "LLAMA_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
-            ),
+            llama_embedding_model=os.environ.get("LLAMA_EMBEDDING_MODEL"),
             llama_device=os.environ.get("LLAMA_DEVICE"),
         )
 

@@ -14,7 +14,7 @@ from typing import Optional
 project_root = Path(__file__).parent
 sys.path.append(str(project_root))
 
-from config import config
+import config
 from src.agent.orchestrator import AIAgent
 
 
@@ -70,7 +70,14 @@ class IntelligentAgentApp:
             }
 
         try:
-            result = await self.agent.run(query, context)
+            # Create the proper user_input dictionary expected by AIAgent.run()
+            user_input = {
+                "query": query,
+                "images": context.get("images", []) if context else []
+            }
+            
+            # Pass the dictionary to the agent
+            result = self.agent.run(user_input)
             return result
         except Exception as e:
             print(f"❌ 处理查询时发生错误: {e}")

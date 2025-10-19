@@ -9,41 +9,51 @@ from typing import Dict, List, Any, Optional
 
 
 class PromptTemplates:
-    """Prompt模板管理器"""
+    """Prompt Templates Manager"""
 
     def __init__(self):
-        """初始化模板"""
+        """Initialize with predefined templates."""
         self.templates = {
-            # 路由相关模板
-            'routing': {
-                'analyze_query': """
-请分析以下用户查询，确定需要使用哪些检索工具来获取信息。
+            # Query analysis templates
+            'query_analysis': {
+                'intent_extraction': """
+Please analyze the following user query to extract intent, keywords, and metadata.
 
-可用工具:
-{available_tools}
+User Query: {query}
 
-用户查询: {query}
+Provide the following information:
+1. Enhanced version of the query that clarifies intent
+2. Key search terms/keywords (as a list)
+3. Query type (factual, conceptual, procedural, opinion)
+4. Domain areas relevant to the query (as a list)
+5. Complexity level (easy, medium, hard)
 
-请以JSON格式返回分析结果，包含:
-- selected_tools: 选中的工具列表
-- reasoning: 选择理由
-- confidence: 置信度(0-1)
-
-分析结果:
+{format_instructions}
 """,
 
-                'tool_selection': """
-基于查询内容，选择最合适的检索工具：
+                'query_rewriting': """
+Rewrite the following query to make it more effective for information retrieval.
+Maintain the original intent but make it more specific, clear, and search-friendly.
 
-查询: {query}
-上下文: {context}
+Original query: {query}
+Additional context: {context}
 
-可选工具: {tools}
-
-请选择最相关的1-3个工具，并说明理由。
+Rewritten query:
 """
             },
 
+            # Routing templates
+            'routing': {
+                'tool_selection': """
+You are an intelligent router that selects the most appropriate tools for a given user query.
+User Query: {query}
+Enhanced Query: {enhanced_query}
+Available Tools: {tools}
+Based on the query, select up to 3 tools that are most relevant. Provide a brief justification for each selected tool.
+Selected Tools:
+""",    
+            },
+            
             # 答案合成模板
             'synthesis': {
                 'basic_qa': """

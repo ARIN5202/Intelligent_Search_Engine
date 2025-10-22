@@ -88,7 +88,6 @@ def _extract_image(path: Path, ocr_lang: str) -> Tuple[Optional[AttachmentText],
         )
     try:
         with Image.open(path) as img:
-            # 处理 EXIF 方向并统一色彩空间
             try:
                 img = ImageOps.exif_transpose(img)  # type: ignore[attr-defined]
             except Exception:
@@ -113,7 +112,6 @@ class Preprocessor:
 
     def __init__(self, ocr_lang: str = "eng"):
         self.ocr_lang = ocr_lang
-        # 保持轻量：不在构造时打印；让调用方根据 issues 决定如何处理
 
     def process(self, query: str, attachments: Optional[Iterable[Union[str, Path]]] = None) -> PreprocessResult:
         pdf_attachments: List[AttachmentText] = []

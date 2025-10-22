@@ -8,7 +8,8 @@
 import asyncio
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Iterable, Union
+from src.preprocessing.preprocessor import Preprocessor
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent
@@ -24,6 +25,7 @@ class IntelligentAgentApp:
     def __init__(self):
         """初始化应用程序"""
         self.agent = AIAgent()
+        self.preproc = Preprocessor(ocr_lang="eng+chi_sim")
         self.is_running = False
 
     async def start(self):
@@ -50,17 +52,13 @@ class IntelligentAgentApp:
         self.is_running = False
         print("✅ 智能代理框架已停止")
 
-    async def process_query(self, query: str, context: Optional[dict] = None) -> dict:
-        """
-        处理用户查询
-
-        Args:
-            query: 用户问题
-            context: 可选的上下文信息
-
-        Returns:
-            处理结果
-        """
+    async def process_query(
+            self,
+            text: Optional[str] = None,
+            attachments: Optional[Iterable[Union[str, Path]]] = None,
+            *,
+            context: Optional[dict] = None,
+    ) -> dict:
         if not self.is_running:
             return {
                 'answer': '系统尚未启动，请稍候再试。',
@@ -68,16 +66,38 @@ class IntelligentAgentApp:
                 'confidence': 0.0,
                 'error': 'System not started'
             }
+        ctx = context or {}
 
         try:
-            # Create the proper user_input dictionary expected by AIAgent.run()
+            # 如果传入了 ocr_lang 就创建一个临时的 preprocessor；否则用默认
+            pre = Preprocessor
+
+            preprocess_result = await asyncio.to_thread(
+                pre.process,
+                text or "",
+                attachments,
+            )
+
             user_input = {
-                "query": query,
-                "images": context.get("images", []) if context else []
+                "raw_query": preprocess_result.raw_query,
+
+                # 结构化附件内容
+                "attachments": [
+                    {"path": str(x.path), "type": x.source_type, "content": x.content}
+                    for x in (preprocess_result.pdf_attachments + preprocess_result.image_attachments)
+                ],
+
+                # 把 issues 也传下去，让 agent 决定是否提示用户或降级
+                "attachment_issues": [i.model_dump() for i in preprocess_result.issues],
             }
-            
-            # Pass the dictionary to the agent
+
+            # 4) 交给 Agent（保持你原来的同步调用）
             result = self.agent.run(user_input)
+
+            # 5) 把预处理的 issues 回填到返回值，方便 CLI 打印/上层可见
+            result.setdefault("preprocess", {})
+            result["preprocess"]["issues"] = user_input["attachment_issues"]
+
             return result
         except Exception as e:
             print(f"❌ 处理查询时发生错误: {e}")

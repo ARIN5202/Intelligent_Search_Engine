@@ -69,7 +69,6 @@ class IntelligentAgentApp:
         ctx = context or {}
 
         try:
-            # 如果传入了 ocr_lang 就创建一个临时的 preprocessor；否则用默认
             pre = Preprocessor
 
             preprocess_result = await asyncio.to_thread(

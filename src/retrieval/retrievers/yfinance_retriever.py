@@ -10,6 +10,15 @@ from .base_retriever import BaseRetriever, RetrievedDocument
 
 class YFinanceRetriever(BaseRetriever):
     """使用 yfinance 快速获取股票或基金的最新行情。"""
+    domain = [
+        "finance", "金融", "财经", "股票", "股价", "股市", "stock", "stock price",
+        "投资", "investment", "investing", "财报", "市值", "ticker", "股票代码",
+        "analyst", "audit"
+    ]
+
+    description = (
+        "It is used to obtain real-time stock prices, market capitalis, company information and other financial data of specific stock codes (Ticker symbols, such as 'AAPL' or 'NVDA')."
+    )
 
     def __init__(
         self,

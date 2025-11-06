@@ -11,6 +11,14 @@ from .base_retriever import BaseRetriever, RetrievedDocument
 
 class WeatherRetriever(BaseRetriever):
     """Fetch current weather information for a given location."""
+    domain = [
+        "weather", "天气", "气温", "温度", "temperature", "下雨", "降雨", "rain",
+        "下雪", "snow", "预报", "forecast", "风力", "湿度", "wind", "humidity"
+    ]
+
+    description = (
+        "Used to obtain the current weather forecast, temperature and weather conditions for a specific location (such as the name of a city)."
+    )
 
     def __init__(
         self,

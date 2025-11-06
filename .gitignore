@@ -27,3 +27,5 @@ build/
 # Editor/OS noise（可选）
 *.swp
 *.swo
+
+AGENTS.md

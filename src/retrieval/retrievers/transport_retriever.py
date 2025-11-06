@@ -11,6 +11,20 @@ from .base_retriever import BaseRetriever, RetrievedDocument
 
 class TransportRetriever(BaseRetriever):
     """Retrieve transport options between an origin and destination."""
+    domain = [
+        "transport", "交通", "路线", "导航", "地图", "map", "navigation",
+        "怎么去", "怎么走", "how to get to",
+        "开车", "驾驶", "driving",
+        "公交", "地铁", "public transport",
+        "多久", "多远", "how long", "distance",
+        "机场", "车站", "airport", "station",
+        "出发地", "目的地", "origin", "destination"
+    ]
+
+    description = (
+        "It is used to query the traffic routes, driving distances and estimated travel times between two locations."
+        'It is applicable to questions such as "How to get from A to B?" or "How long does it take to drive?"'
+    )
 
     def __init__(
         self,

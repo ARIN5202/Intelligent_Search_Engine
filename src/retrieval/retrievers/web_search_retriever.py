@@ -11,6 +11,18 @@ from .base_retriever import BaseRetriever, RetrievedDocument
 
 class WebSearchRetriever(BaseRetriever):
     """Perform real-time web searches via an HTTP API."""
+    domain = [
+        "web_search", "网页搜索", "通用搜索", "general"
+        "搜索", "search", "google", "bing", "上网查",
+        "文章", "article", "博客", "blog",
+        "公司新闻", "产品发布", "public", "公众"
+    ]
+
+    description = (
+        "Used for performing real-time web page searches on the Internet."
+        "It is suitable for querying the latest current affairs, news, definitions, tutorials, or any general knowledge questions that other professional tools (such as weather, finance) cannot answer."
+        "This is a universal fallback tool."
+    )
 
     def __init__(
         self,

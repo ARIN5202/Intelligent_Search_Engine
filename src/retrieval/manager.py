@@ -117,3 +117,5 @@ class RetrievalManager:
 
 
 __all__ = ["RetrievalManager", "RetrievalRequest"]
+
+retrieval_manager = RetrievalManager(settings=get_settings())

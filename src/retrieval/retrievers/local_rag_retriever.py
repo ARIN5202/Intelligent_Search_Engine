@@ -19,6 +19,21 @@ from .base_retriever import BaseRetriever, RetrievedDocument
 
 class LocalRAGRetriever(BaseRetriever):
     """基于 LlamaIndex 的本地语义检索。"""
+    domain = [
+        "local_rag",
+        "Sereleia", "Althaven", "Morrigna", "Whispering Revolution",
+        "Aetherian Dynamics", "Aris Thorne", "Chrono-Weave", "Synapse", "Gaia AI",
+        "Xylos", "Kepler-186", "Luminoids", "Crystalline Forests", "Auralight",
+        "Elara Vance", "Vance Protocol", "Deep Reach Observatory",
+        "Great Digital Awakening", "Three Silent Days", "Pillars", "Digital Compact",
+        "fiction", "科幻", "science fiction"
+    ]
+
+    description = (
+        "Used for querying the local fictional knowledge base (a science fiction novel)."
+        "When the question contains proper nouns (such as 'Sereleia', 'Aetherian Dynamics', 'Xylos planet ', 'Dr. Elara Vance' or 'Great Digital Awakening'),"
+        "This tool must be given priority."
+    )
 
     def __init__(self, settings: Settings, *, persist_dir: Optional[Path | str] = None) -> None:
         """Initialise retriever with project settings and optional custom index directory."""

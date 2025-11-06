@@ -20,13 +20,7 @@ class PromptTemplates:
 Please analyze the following user query to extract intent, keywords, and metadata.
 
 User Query: {query}
-
-Provide the following information:
-1. Enhanced version of the query that clarifies intent
-2. Key search terms/keywords (as a list)
-3. Query type (factual, conceptual, procedural, opinion)
-4. Domain areas relevant to the query (as a list)
-5. Complexity level (easy, medium, hard)
+Additional Context (if any): {context}
 
 {format_instructions}
 """,
@@ -36,7 +30,7 @@ Rewrite the following query to make it more effective for information retrieval.
 Maintain the original intent but make it more specific, clear, and search-friendly.
 
 Original query: {query}
-Additional context: {context}
+Additional context (if any, e.g., attachments): {context}
 
 Rewritten query:
 """

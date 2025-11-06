@@ -69,7 +69,7 @@ class IntelligentAgentApp:
         ctx = context or {}
 
         try:
-            pre = Preprocessor
+            pre = self.preproc  # Use the instance of Preprocessor initialized in the constructor
 
             preprocess_result = await asyncio.to_thread(
                 pre.process,
@@ -197,6 +197,7 @@ async def main():
             elif mode == 'query' and len(sys.argv) > 2:
                 # 单次查询模式
                 query = ' '.join(sys.argv[2:])
+                print(f"🔄 处理单次查询: {query}")
                 result = await app.process_query(query)
                 print(f"问题: {query}")
                 print(f"回答: {result['answer']}")

@@ -17,7 +17,7 @@ class PromptTemplates:
             # Query analysis templates
             'query_analysis': {
                 'intent_extraction': """
-Please analyze the following user query to extract intent, keywords, and metadata.
+Please analyze the following user query to extract intent, keywords, domain areas, complexity, and retriever metadata.
 
 User Query: {query}
 Additional Context (if any): {context}
@@ -29,6 +29,8 @@ Additional Context (if any): {context}
 Rewrite the following query to make it more effective for information retrieval.
 Maintain the original intent but make it more specific, clear, and search-friendly.
 
+Important: Do not replace words like "current" with specific values (e.g., years) unless explicitly instructed.
+
 Original query: {query}
 Additional context (if any, e.g., attachments): {context}
 
@@ -39,13 +41,33 @@ Rewritten query:
             # Routing templates
             'routing': {
                 'tool_selection': """
-You are an intelligent router that selects the most appropriate tools for a given user query.
-User Query: {query}
-Enhanced Query: {enhanced_query}
-Available Tools: {tools}
-Based on the query, select up to 3 tools that are most relevant. Provide a brief justification for each selected tool.
-Selected Tools:
-""",    
+You are an intelligent routing agent responsible for selecting the most appropriate tools for processing a user query. 
+Analyze the query and its metadata, and choose up to 3 tools from the available options. Provide a clear justification for each selected tool.
+
+### Input Details:
+- User Query: {query}
+- Enhanced Query: {rewritten_query}
+- Keywords: {keywords}
+- Domain Areas: {domain_areas}
+
+### Available Tools:
+{tool_descriptions}
+
+### Output Format:
+{
+    "selected_tool": {
+        "tool_name": "<tool_name>",
+        "justification": "<why this tool is selected>"
+    },
+    "reasoning": "<overall reasoning for the selection>"
+}
+
+If no tool is relevant, respond with:
+{
+    "selected_tool": null,
+    "reasoning": "No tool selected. Reason: <explanation>"
+}
+"""
             },
             
             # 答案合成模板

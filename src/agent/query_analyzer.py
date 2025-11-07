@@ -6,9 +6,9 @@ Responsible for analyzing user queries to enhance retrieval performance
 """
 
 from typing import Dict, Any, List, Optional
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-from langchain.output_parsers import PydanticOutputParser
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers.pydantic import PydanticOutputParser
 from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field
 from ..prompts.templates import PromptTemplates
@@ -29,10 +29,16 @@ class QueryAnalysis(BaseModel):
     """Schema for query analysis output"""
     keywords: List[str] = Field(description="Key terms extracted from the query")
     query_type: str = Field(description="Type of query (e.g., factual, conceptual, procedural)")
-    domain_areas: List[str] = Field(description="Relevant domain areas for this query (e.g., healthcare, finance)")
+    domain_areas: List[str] = Field(description="Relevant domain areas for this query (e.g., finance, weather, entertainment, transport, general)")
     complexity: str = Field(description="Query complexity (easy, medium, hard)")
-    intent: str = Field(description="User's intent (e.g., retrieve information, perform action)")
-
+    retriever_metadata: Dict[str, Any] = Field(
+        description="Metadata for retrievers, including data type, filters, and priority sources",
+        example={
+            "data_types": ["financial reports", "stock data", "news articles"],
+            "filters": {"company": ["NVIDIA", "AMD"], "date_range": "last 6 months"},
+            "priority_sources": ["official filings", "trusted financial news outlets"]
+        }
+    )
 
 class QueryRewriter:
     """Component to rewrite queries for better analysis and retrieval"""
@@ -49,10 +55,7 @@ class QueryRewriter:
                 template=template_content
             )
             
-            self.rewrite_chain = LLMChain(
-                llm=self.llm,
-                prompt=self.rewrite_template
-            )
+            self.rewrite_chain = self.rewrite_template | llm | StrOutputParser()
 
         except ValueError as e:
             raise ValueError(f"Missing required template: analysis.query_rewriting. Please add this template to templates.py: {e}")
@@ -69,13 +72,12 @@ class QueryRewriter:
             Rewritten query that incorporates textual information from attachments
         """
         try:
-            rewritten = self.rewrite_chain.invoke(
+            rewritten_query = self.rewrite_chain.invoke(
                 {
                 "query": query,
                 "context": "\n".join(attachment_contents) if attachment_contents else ""
                 }
             )
-            rewritten_query = rewritten.get("text", query)
 
             return rewritten_query
             
@@ -85,10 +87,10 @@ class QueryRewriter:
 
 
 class IntentExtractor:
-    """Extracts and analyzes user intent from queries"""
+    """Extracts and analyzes user intent from queries, including retriever metadata."""
     
     def __init__(self):
-        """Initialize the intent extractor with local LLM"""
+        """Initialize the intent extractor with local LLM."""
         self.llm = llm
         self.parser = PydanticOutputParser(pydantic_object=QueryAnalysis)
         
@@ -98,16 +100,16 @@ class IntentExtractor:
             
             # Create prompt template
             self.analysis_template = PromptTemplate(
-                input_variables=["query", "format_instructions"],
+                input_variables=["query", "format_instructions", "context"],
                 template=template_content
             )
+            self.analysis_template = self.analysis_template.partial(
+                format_instructions=self.parser.get_format_instructions()
+            )   # add format instructions based on the parser
             
             # Set up the chain
-            self.analysis_chain = LLMChain(
-                llm=self.llm,
-                prompt=self.analysis_template.partial(format_instructions=self.parser.get_format_instructions()),
-                output_parser=self.parser
-            )
+            self.analysis_chain = self.analysis_template | llm | self.parser
+
         except ValueError as e:
             raise ValueError(f"Missing required template: query_analysis.intent_extraction. Please add this template to templates.py: {e}")
 
@@ -125,10 +127,12 @@ class IntentExtractor:
         try:
             # Run analysis chain
             analysis_result = self.analysis_chain.invoke(
-                {"query": query,
-                 "context": "\n".join(attachment_contents) if attachment_contents else ""   
+                {
+                    "query": query,
+                    "context": "\n".join(attachment_contents) if attachment_contents else ""   
                 }
-            )['text']
+            )
+            print(f"Intent Extraction Result: {analysis_result}")
             
             # Return enhanced query and metadata
             return {
@@ -138,19 +142,22 @@ class IntentExtractor:
                 "query_type": analysis_result.query_type,
                 "domain_areas": analysis_result.domain_areas,
                 "complexity": analysis_result.complexity,
-                "intent": analysis_result.intent
+                # "intent": analysis_result.intent
+                "retriever_metadata": analysis_result.retriever_metadata
             }
+        
         except Exception as e:
             print(f"ERROR INTENT EXTRACTION: {e}")
             # Return original query if analysis fails
             return {
                 "original_query": '',
-                "rewritten_query": query,
+                "rewritten_query": '',
                 "keywords": [],
                 "query_type": "unknown",
                 "domain_areas": [],
                 "complexity": "unknown",
-                "intent": "unknown"
+                # "intent": "unknown"
+                "retriever_metadata": {},
             }
     
 
@@ -164,7 +171,7 @@ class QueryAnalyzer:
 
     def analyze(self, query: str, attachment_contents:list, use_attachments=False) -> Dict[str, Any]:
         """
-        Complete query analysis pipeline: rewriting followed by intent analysis
+        Complete query analysis pipeline: rewriting, intent analysis, and retriever metadata extraction.
         
         Args:
             query: Original user query
@@ -172,7 +179,7 @@ class QueryAnalyzer:
             use_attachments: Flag indicating whether to use attachments in analysis
 
         Returns:
-            Enhanced query and analysis metadata
+            Enhanced query and analysis metadata, including retriever metadata.
         """
         # Step 1: Rewrite the query for better quality
         rewritten_query = self.query_rewriter.rewrite(

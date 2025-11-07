@@ -1,100 +1,178 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-智能路由器 - 任务2
-分析用户问题，决定调用哪些检索工具
+Smart Router - Task 2 / Step 2
+Analyze user query and decide which retrieval tools to call
 """
 
-import asyncio
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
+from warnings import filters
+
+from sentence_transformers import SentenceTransformer, util
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain_openai import AzureChatOpenAI
+
 from ..prompts.templates import PromptTemplates
+
+from ..retrieval.manager import retrieval_manager
+
+
+# Azure OpenAI client initialization
+llm = AzureChatOpenAI(
+    api_version="2025-02-01-preview",
+    deployment_name="gpt-4o-mini",
+    temperature=0.3,
+    max_tokens=1000,
+) 
 
 
 class Router:
-    """智能路由器，负责分析查询并选择合适的检索工具"""
+    """Smart Router that analyzes queries and selects appropriate retrieval tools"""
 
     def __init__(self):
-        """初始化路由器"""
-        self.available_tools = {
-            'local_rag': {
-                'name': '本地知识库',
-                'description': '搜索公司内部文档、规章制度等',
-                'keywords': ['公司', '规定', '制度', '政策', '内部']
-            },
-            'web_search': {
-                'name': '网络搜索',
-                'description': '搜索最新的网络信息',
-                'keywords': ['最新', '新闻', '当前', '今天', '搜索']
-            },
-            'weather': {
-                'name': '天气查询',
-                'description': '获取天气预报信息',
-                'keywords': ['天气', '温度', '下雨', '晴天', '预报']
-            },
-            'finance': {
-                'name': '金融数据',
-                'description': '获取股票、汇率等金融信息',
-                'keywords': ['股票', '汇率', '金融', '投资', '价格']
-            },
-            'transport': {
-                'name': '交通路线',
-                'description': '查询交通路线和时间',
-                'keywords': ['路线', '交通', '地铁', '公交', '导航']
-            }
-        }
-        self.prompt_templates = PromptTemplates()
+        """Initialize Router"""
+        self.retrieval_manager = retrieval_manager
 
-    async def route(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        self.model = SentenceTransformer("all-MiniLM-L6-v2")
+
+        # Initialize Azure OpenAI LLM
+        self.llm = llm
+        
+        # Initialize prompt templates
+        try:
+            template_content = PromptTemplates().get_template('routing', 'tool_selection')
+            self.routing_template = PromptTemplate(
+                input_variables=["query", "tool_descriptions", "keywords", "domain_areas", "intent"],
+                template=template_content
+            )
+        except ValueError as e:
+            raise ValueError(f"Missing required template: routing.tool_selection. Please add this template to templates.py: {e}")
+
+    def get_available_tool_info(self) -> Dict[str, Dict[str, Any]]:
         """
-        分析查询并返回路由结果
-
-        Args:
-            query: 用户查询
-            context: 可选的上下文信息
+        Fetch all available tools from the RetrievalManager.
 
         Returns:
-            路由结果，包含选中的工具和参数
+            A dictionary where keys are tool names and values are tool metadata.
         """
-        # 基于关键词的简单路由逻辑（实际项目中应该使用LLM）
-        selected_tools = []
-        confidence_scores = {}
+        tool_info = {}
+        for retriever_name in self.retrieval_manager.list_retrievers():
+            retriever_instance = self.retrieval_manager.get_retriever(retriever_name)
+            tool_info[retriever_name] = {
+                "domains": getattr(retriever_instance, "domain", ["general"]),
+                "description": getattr(retriever_instance, "description", "No description available.")
+            }
+        return tool_info
 
-        query_lower = query.lower()
+    def route(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Analyze the query and return routing results
 
-        # 检查每个工具的关键词匹配
-        for tool_id, tool_info in self.available_tools.items():
-            score = 0
-            for keyword in tool_info['keywords']:
-                if keyword in query_lower:
-                    score += 1
+        Args:
+            analysis_results: Results from the query analysis step, including:
+                - rewritten_query: The rewritten query string.
+                - keywords: Extracted keywords from the query.
+                - intent: The intent of the query.
+                - domain_areas: The domain(s) the query belongs to.
+                - complexity: The complexity of the query.
 
-            if score > 0:
-                selected_tools.append(tool_id)
-                confidence_scores[tool_id] = score / len(tool_info['keywords'])
+        Returns:
+            A dictionary containing:
+                - selected_tool: the most suitable retrieval tool(s) for the query
+                - reasoning: Explanation of the routing decision
+                - retriever_metadata: Additional metadata for the selected retriever
+        """
+        try: 
+            # Fetch available tools dynamically
+            tool_info = self.get_available_tool_info()
 
-        # 如果没有匹配到任何工具，默认使用本地知识库和网络搜索
-        if not selected_tools:
-            selected_tools = ['local_rag', 'web_search']
-            confidence_scores = {'local_rag': 0.5, 'web_search': 0.5}
+            # Extract the keywords from analysis results
+            query = analysis_results.get("rewritten_query") or analysis_results.get("raw_query") or ""
+            query_keywords = analysis_results.get("keywords", [])
+            query_domains = analysis_results.get("domain_areas", [])
+            # query_intent = analysis_results.get("intent", "").lower()
 
-        return {
-            'query': query,
-            'selected_tools': selected_tools,
-            'confidence_scores': confidence_scores,
-            'top_k': self._determine_top_k(query),
-            'reasoning': f"基于关键词匹配选择了工具: {selected_tools}"
-        }
+            # 1) quick word matching based on domains
+            best_tool = None
+            for tool_name, info in tool_info.items():
+                tool_domains = info.get("domains", [])
+                # print(f"Checking tool '{tool_name}' with domains {tool_domains} against query domains {query_domains}")
+                if any(domain.lower() in tool_domains for domain in query_domains):
+                    best_tool = tool_name
+                    reasoning = f"Exact domain match found for tool '{best_tool}'."
+                    break
+
+            # 2) semantic matching with embeddings if no exact match
+            if not best_tool:
+                q_emb = self.model.encode(query, convert_to_tensor=True)
+                scores = {}
+                for tool_name, info in tool_info.items():
+                    tool_emb = self.model.encode(" ".join(info.get("domains", [])), convert_to_tensor=True)
+                    sim = util.cos_sim(q_emb, tool_emb).item()
+                    scores[tool_name] = sim
+
+                # Select tools with similarity above threshold
+                sorted_tools = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+                top_tool, top_score = sorted_tools[0] if sorted_tools else (None, 0.0)
+                if top_score >= 0.5:  # similarity threshold
+                    best_tool = top_tool
+                    reasoning = f"Semantic match found for tool '{best_tool}' with similarity {top_score:.2f}."
+
+            # 3) fallback to LLM classification if still ambiguous
+            if not best_tool:
+                try:
+                    tool_descriptions = ", ".join([f"{name}: {info['description']}" for name, info in tool_info.items()])
+                    # Use LLMChain to invoke the Azure OpenAI API
+                    routing_chain = self.routing_template | self.llm | StrOutputParser()
+
+                    response = routing_chain.invoke(
+                        {
+                            "query": query,
+                            "tool_descriptions": tool_descriptions,
+                            "keywords": ", ".join(query_keywords),
+                            "domain_areas": ", ".join(query_domains),
+                            # "intent": query_intent,
+                        }
+                    )
+
+                    # Parse the response to extract the best tool
+                    response_text = response.get("text", "").strip()
+                    parsed_response = eval(response_text)  # Convert JSON-like string to Python dict
+
+                    # Validate the parsed response
+                    if "selected_tool" in parsed_response and "reasoning" in parsed_response:
+                        best_tool = parsed_response["selected_tool"]["tool_name"]
+                        reasoning = parsed_response["reasoning"]
+                    else:
+                        raise ValueError("Malformed response from LLM. Missing required fields.")
+                    
+                except Exception as e:
+                    # Final fallback
+                    best_tool = "web_search"
+                    reasoning = f"Error in LLM-based routing: {e}. Defaulting to 'web_search'."
+
+            return {
+                "selected_tool": best_tool,
+                # "confidence_scores": confidence if 'confidence' in locals() else {tool: 1.0 for tool in selected_tools},
+                # "top_k": self._determine_top_k(query),
+                "reasoning": reasoning
+            }
+
+        except Exception as e:
+            return {
+                "selected_tool": "web_search",
+                # "confidence_scores": {"local_rag": 0.0},
+                # "top_k": 10,
+                "reasoning": f"Error in routing: {e}. Defaulting to 'web_search'."
+            }
 
     def _determine_top_k(self, query: str) -> int:
-        """根据查询复杂度确定检索数量"""
+        """Determine number of documents to retrieve based on query complexity"""
         if len(query.split()) > 10:
-            return 15  # 复杂查询需要更多信息
+            return 15  # Complex queries require more information
         return 10
 
     async def health_check(self) -> bool:
-        """健康检查"""
+        """Health check"""
         return True
-
-    async def get_available_tools(self) -> Dict[str, Dict[str, Any]]:
-        """获取可用工具列表"""
-        return self.available_tools

@@ -39,7 +39,6 @@ class TransportRetriever(BaseRetriever):
 
     def _retrieve(
         self,
-        query: str,
         *,
         top_k: int,
         origin: Optional[str] = None,
@@ -52,7 +51,7 @@ class TransportRetriever(BaseRetriever):
         if not destination:
             raise ValueError("Destination must be provided for transport queries.")
 
-        origin_text = (origin or query).strip()
+        origin_text = origin.strip()
         if not origin_text:
             raise ValueError("Origin must be provided or inferred from the query.")
 

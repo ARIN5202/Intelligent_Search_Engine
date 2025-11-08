@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
+from httpcore import Origin
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -55,7 +56,11 @@ def manager() -> RetrievalManager:
 
 
 def test_finance_alpha_vantage_live(manager: RetrievalManager) -> None:
-    result = manager.retrieve_finance("NVDA", provider="finance", top_k=1)
+    # 只有finance的是用manager.retrieve_finance()不需要指定名字
+    # symbol就是要查询的股票代码
+    # provider默认用finance就好
+    # top_k是返回跟symbol相关的具体几条
+    result = manager.retrieve_finance("AAPL", provider="finance", top_k=1)
     print(result)
     print("=" * 40)
     assert result.documents, "Alpha Vantage 应返回至少一条报价"
@@ -63,6 +68,10 @@ def test_finance_alpha_vantage_live(manager: RetrievalManager) -> None:
 
 
 def test_finance_yfinance_live(manager: RetrievalManager) -> None:
+    # 只有finance的是用manager.retrieve_finance()不需要指定名字
+    # symbol就是要查询的股票代码
+    # provider默认用finance就好
+    # top_k是返回跟symbol相关的具体几条
     result = manager.retrieve_finance("NVDA", provider="finance_yf", top_k=1)
     print(result)
     print("=" * 40)
@@ -70,6 +79,11 @@ def test_finance_yfinance_live(manager: RetrievalManager) -> None:
 
 
 def test_weather_openweather_live(manager: RetrievalManager) -> None:
+    # manager.retrieve(weather)
+    # name是具体用哪个retriever
+    # weather的query只能是英文的地名，比如beijing kunming London
+    # units="metric" 这里默认
+    # top_k是返回跟symbol相关的具体几条
     result = manager.retrieve("weather", "Kunming", units="metric", top_k=1)
     print(result)
     print("=" * 40)
@@ -77,11 +91,18 @@ def test_weather_openweather_live(manager: RetrievalManager) -> None:
 
 
 def test_transport_google_maps_live(manager: RetrievalManager) -> None:
+    # manager.retrieve(transport)
+    # name是具体用哪个retriever
+    # transport
+    # Origin 是起始地
+    # Destination 是目的地
+    # mode是出行模式
+    # top_k是返回跟symbol相关的具体几条
     result = manager.retrieve(
         "transport",
-        "Central, Hong Kong",
-        destination="The Hong Kong University of Science and Technology",
-        mode="transit",
+        Origin="Central, Hong Kong",
+        destination = "The Hong Kong University of Science and Technology",
+        mode = "transit",
         top_k=1,
     )
     print(result)
@@ -90,6 +111,13 @@ def test_transport_google_maps_live(manager: RetrievalManager) -> None:
 
 
 def test_google_search_live(manager: RetrievalManager) -> None:
+    # manager.retrieve(web_search)
+    # name是具体用哪个retriever
+    # web_search
+    # query就是搜索的问题
+    # top_k是返回跟symbol相关的具体几条
+    # params 是一些配置，要根据query来修改下，比如英文问题可能是params = {"gl": "us", "hl": "en"}
+    # 还有header这个参数，可以暂时忽略，没什么要做认证的
     result = manager.retrieve(
         "web_search",
         "中国的首都是哪？",

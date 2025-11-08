@@ -39,7 +39,8 @@ class TransportRetriever(BaseRetriever):
 
     def _retrieve(
         self,
-        *,
+        query: str,
+         *,
         top_k: int,
         origin: Optional[str] = None,
         destination: Optional[str] = None,

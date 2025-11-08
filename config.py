@@ -91,6 +91,10 @@ class Settings:
     llama_embedding_model: Optional[str]
     llama_device: Optional[str]
 
+    deepseek_api_key: Optional[str]
+    deepseek_url: str
+    deepseek_model: str
+
     @classmethod
     def from_env(cls, env_file: Optional[Path | str] = None) -> "Settings":
         """Build a ``Settings`` instance using environment variables."""
@@ -133,6 +137,9 @@ class Settings:
             user_agent=os.environ.get("USER_AGENT", "IntelligentSearchEngine/1.0"),
             llama_embedding_model=os.environ.get("LLAMA_EMBEDDING_MODEL"),
             llama_device=os.environ.get("LLAMA_DEVICE"),
+            deepseek_api_key=os.environ.get("DEEPSEEK_API_KEY"),
+            deepseek_url=os.environ.get("DEEPSEEK_URL"),
+            deepseek_model=os.environ.get("DEEPSEEK_MODEL"),
         )
 
     def ensure_directories(self) -> None:

@@ -1,137 +1,211 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-答案合成器 - 任务4
-将检索到的信息合成为最终答案
+Synthesizer - Step 5-6
+负责：
+- 接收 RerankResult（已按相关性排好）
+- 做上下文过滤（Top-k / 长度控制）
+- 调用 DeepSeek API 做最终回答
+- 记录延迟和 Token 使用情况
 """
 
-import asyncio
-from typing import List, Dict, Any, Optional
-from ..prompts.templates import PromptTemplates
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Sequence
+
+from config import Settings
+from openai import OpenAI  # pip install openai
+
+from reranker import ContextDoc, RerankResult
+
+
+@dataclass(slots=True)
+class SynthesizedResponse:
+    """
+    LLM 综合后的最终结果。
+    """
+    query: str
+    answer: str
+    contexts: List[ContextDoc]          # 实际用于生成回答的上下文（已过滤）
+    latency: float                     # LLM 调用耗时（秒）
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+def _filter_contexts(
+        contexts: Sequence[ContextDoc],
+    max_k: int,
+    max_chars: int,
+) -> List[ContextDoc]:
+    """
+    根据排序结果做二次过滤：
+    - 只取前 max_k 条
+    - 同时控制拼接后的总字符数不超过 max_chars
+    """
+    if not contexts:
+        return []
+
+    selected: List[ContextDoc] = []
+    used_chars = 0
+
+    for doc in contexts[:max_k]:
+        c = doc.content
+        length = len(c)
+        if used_chars + length > max_chars:
+            break
+        selected.append(doc)
+        used_chars += length
+
+    return selected
 
 
 class Synthesizer:
-    """答案合成器，负责将检索信息合成为最终回答"""
+    """
+    用法：
+        synthesizer = Synthesizer(api_key=..., model="deepseek-chat")
+        final = synthesizer.synthesize(query, rerank_result, top_k=8)
 
-    def __init__(self):
-        """初始化合成器"""
-        self.prompt_templates = PromptTemplates()
-        # TODO: 在实际项目中这里应该初始化LLM客户端
-        # 例如: OpenAI GPT, Claude, 或本地LLM
+    上层就拿 SynthesizedResponse.answer 给用户即可。
+    """
 
-    async def generate_answer(self, query: str, retrieved_docs: List[Dict[str, Any]],
-                              context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def __init__(
+        self,
+        api_key: str,
+        model: str = Settings.deepseek_model,
+        base_url: str = Settings.deepseek_url,
+        system_prompt: str | None = None,
+        max_contexts: int = 8,
+        max_context_chars: int = 12000,
+    ) -> None:
         """
-        生成最终答案
-
-        Args:
-            query: 用户查询
-            retrieved_docs: 检索到的相关文档
-            context: 可选的上下文信息
-
-        Returns:
-            包含答案、来源和置信度的字典
+        :param api_key: DeepSeek API Key
+        :param model:   DeepSeek 模型名，如 "deepseek-chat" / "deepseek-reasoner"
+        :param base_url: DeepSeek API base url
+        :param system_prompt: 系统提示词，用于规范回答风格和使用上下文规则
+        :param max_contexts: 最多使用多少条 context（再上游已经是 Top-k，这里是保险）
+        :param max_context_chars: 拼接后的 context 字符总长上限，避免 prompt 过长
         """
-        if not retrieved_docs:
-            return {
-                'answer': '抱歉，我没有找到相关信息来回答您的问题。',
-                'sources': [],
-                'confidence': 0.0
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.model = model
+        self.max_contexts = max_contexts
+        self.max_context_chars = max_context_chars
+
+        if system_prompt is None:
+            system_prompt = (
+                "You are a retrieval-augmented assistant. "
+                "You MUST carefully read the provided context snippets and "
+                "answer the user's question using them as primary evidence. "
+                "If the context is insufficient or conflicting, say so clearly "
+                "and reason cautiously."
+            )
+        self.system_prompt = system_prompt
+
+
+    def synthesize(
+        self,
+        query: str,
+        rerank_result: RerankResult,
+        top_k: Optional[int] = None,
+    ) -> SynthesizedResponse:
+        """
+        主入口：
+        - 从 RerankResult 中拿到排好序的 contexts
+        - 再做一次 Top-k / 长度过滤
+        - 调用 DeepSeek 生成最终回答
+        - 返回带 latency / usage 的结构化结果
+        """
+        if top_k is None:
+            top_k = self.max_contexts
+
+        # 1) 上下文过滤（Top-k + 长度限制）
+        filtered_contexts = _filter_contexts(
+            rerank_result.contexts,
+            max_k=top_k,
+            max_chars=self.max_context_chars,
+        )
+
+        # 2) 构造 messages
+        messages = self._build_messages(query, filtered_contexts)
+        # 3) 调用 DeepSeek + 记录耗时
+        start = time.perf_counter()
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            stream=False,
+        )
+        elapsed = time.perf_counter() - start
+
+        # 4) 解析回答和 usage
+        choice = resp.choices[0]
+        answer_text = choice.message.content or ""
+
+        usage_info = {}
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            # openai SDK 返回的是对象，这里稳妥一点 getattr
+            usage_info = {
+                "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                "completion_tokens": getattr(usage, "completion_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
             }
 
-        # 构建prompt
-        prompt = self._build_synthesis_prompt(query, retrieved_docs, context)
-
-        # 生成答案（这里是模拟，实际应该调用LLM）
-        answer = await self._call_llm(prompt)
-
-        # 提取来源信息
-        sources = self._extract_sources(retrieved_docs)
-
-        # 计算置信度
-        confidence = self._calculate_confidence(retrieved_docs, answer)
-
-        return {
-            'answer': answer,
-            'sources': sources,
-            'confidence': confidence,
-            'reasoning': '基于检索到的文档合成答案'
+        metadata: Dict[str, Any] = {
+            "llm_model": resp.model,
+            "llm_finish_reason": getattr(choice, "finish_reason", None),
+            "llm_usage": usage_info,
+            "llm_latency": elapsed,
         }
 
-    def _build_synthesis_prompt(self, query: str, documents: List[Dict[str, Any]],
-                                context: Optional[Dict[str, Any]] = None) -> str:
-        """构建合成prompt"""
-        # 整理文档内容
-        doc_contents = []
-        for i, doc in enumerate(documents, 1):
-            content = f"文档{i}: {doc.get('content', '')}"
-            if doc.get('title'):
-                content = f"文档{i} ({doc['title']}): {doc.get('content', '')}"
-            doc_contents.append(content)
+        return SynthesizedResponse(
+            query=query,
+            answer=answer_text.strip(),
+            contexts=filtered_contexts,
+            latency=elapsed,
+            metadata=metadata,
+        )
 
-        context_str = ""
-        if context:
-            context_str = f"上下文信息: {context}\n\n"
+    # ---------- Internal helpers ----------
 
-        prompt = f"""请基于以下检索到的文档回答用户问题。
+    def _build_messages(
+        self,
+        query: str,
+        contexts: Sequence[ContextDoc],
+    ) -> List[Dict[str, str]]:
+        """
+        构造发给 DeepSeek 的 messages（OpenAI 风格）。
+        把所有 context 组合成一个用户侧提示的一部分。
+        """
 
-{context_str}用户问题: {query}
-
-相关文档:
-{chr(10).join(doc_contents)}
-
-请要求:
-1. 基于提供的文档内容回答问题
-2. 答案要准确、完整、易懂
-3. 如果文档中没有足够信息，请说明
-4. 保持回答的客观性
-
-回答:"""
-
-        return prompt
-
-    async def _call_llm(self, prompt: str) -> str:
-        """调用LLM生成答案（模拟实现）"""
-        # TODO: 在实际项目中这里应该调用真实的LLM API
-        # 这里提供一个简单的模拟实现
-
-        # 模拟LLM响应时间
-        await asyncio.sleep(0.1)
-
-        # 简单的基于关键词的回答生成（仅用于演示）
-        if "天气" in prompt:
-            return "根据检索到的信息，今天的天气情况是..."
-        elif "公司" in prompt or "规定" in prompt:
-            return "根据公司相关文档，相关规定如下..."
+        # 把 context 格式化清晰，方便模型引用
+        if contexts:
+            ctx_lines: List[str] = []
+            for i, c in enumerate(contexts, start=1):
+                src = c.source
+                score = (
+                    f" | rerank_score={c.rerank_score:.4f}"
+                    if c.rerank_score is not None
+                    else ""
+                )
+                ctx_lines.append(
+                    f"[{i}] (source={src}{score})\n{c.content.strip()}"
+                )
+            ctx_block = "\n\n".join(ctx_lines)
         else:
-            return "基于检索到的文档，我为您整理了以下信息..."
+            ctx_block = "No external contexts were retrieved."
 
-    def _extract_sources(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """提取来源信息"""
-        sources = []
-        for doc in documents:
-            source = {
-                'title': doc.get('title', '未知标题'),
-                'source': doc.get('source', ''),
-                'score': doc.get('rerank_score', doc.get('score', 0)),
-                'snippet': doc.get('content', '')[:200] + '...' if len(doc.get('content', '')) > 200 else doc.get(
-                    'content', '')
-            }
-            sources.append(source)
-        return sources
+        user_content = (
+            f"User Question:\n{query.strip()}\n\n"
+            f"Retrieved Contexts (use them as primary evidence when relevant):\n"
+            f"{ctx_block}\n\n"
+            "Instructions:\n"
+            "- First, infer the answer based on the contexts above.\n"
+            "- If multiple snippets conflict, explain the conflict and choose the most reliable.\n"
+            "- If key information is missing, explicitly say what is missing instead of fabricating.\n"
+            "- Answer in a clear, concise, and well-structured way."
+        )
 
-    def _calculate_confidence(self, documents: List[Dict[str, Any]], answer: str) -> float:
-        """计算答案置信度"""
-        if not documents:
-            return 0.0
-
-        # 基于文档分数和数量计算置信度
-        avg_score = sum(doc.get('rerank_score', doc.get('score', 0)) for doc in documents) / len(documents)
-        doc_count_factor = min(1.0, len(documents) / 5)  # 5个文档为满分
-
-        confidence = (avg_score * 0.7 + doc_count_factor * 0.3)
-        return min(1.0, confidence)
-
-    async def health_check(self) -> bool:
-        """健康检查"""
-        return True
+        return [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": user_content},
+        ]

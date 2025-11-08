@@ -100,9 +100,10 @@ def test_transport_google_maps_live(manager: RetrievalManager) -> None:
     # top_k是返回跟symbol相关的具体几条
     result = manager.retrieve(
         "transport",
-        Origin="Central, Hong Kong",
+        query="1",
+        origin="Central, Hong Kong",
         destination = "The Hong Kong University of Science and Technology",
-        mode = "transit",
+        mode = "car",
         top_k=1,
     )
     print(result)

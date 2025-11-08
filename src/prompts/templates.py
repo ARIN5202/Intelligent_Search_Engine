@@ -17,7 +17,7 @@ class PromptTemplates:
             # Query analysis templates
             'query_analysis': {
                 'intent_extraction': """
-Please analyze the following user query to extract intent, keywords, domain areas, complexity, and retriever metadata.
+Please analyze the following user query to extract intent, keywords, domain areas, complexity.
 
 User Query: {query}
 Additional Context (if any): {context}
@@ -42,31 +42,32 @@ Rewritten query:
             'routing': {
                 'tool_selection': """
 You are an intelligent routing agent responsible for selecting the most appropriate tools for processing a user query. 
-Analyze the query and its metadata, and choose up to 3 tools from the available options. Provide a clear justification for each selected tool.
+Analyze the query and its metadata, and choose the most suitable tool. Provide a clear justification for the selection.
 
 ### Input Details:
-- User Query: {query}
-- Enhanced Query: {rewritten_query}
+- Rewritten Query: {rewritten_query}
 - Keywords: {keywords}
 - Domain Areas: {domain_areas}
 
 ### Available Tools:
 {tool_descriptions}
 
-### Output Format:
-{
-    "selected_tool": {
-        "tool_name": "<tool_name>",
-        "justification": "<why this tool is selected>"
-    },
-    "reasoning": "<overall reasoning for the selection>"
-}
+{format_instructions}
+""",
+                "retrieval_metadata": """
+You are an intelligent assistant tasked with extracting specific metadata from a user query based on the selected tool.
 
-If no tool is relevant, respond with:
-{
-    "selected_tool": null,
-    "reasoning": "No tool selected. Reason: <explanation>"
-}
+### Input Details:
+- Selected Tool: {tool_name}
+- User Query: {query}
+
+### Tool-Specific Metadata Requirements:
+1. Finance: Extract the ticker symbol (e.g., AAPL, TSLA).
+2. Weather: Extract the location (e.g., city, country, or area name).
+3. Transport: Extract the origin, destination, and transit mode (e.g., driving, walking, bicycling, transit (for public transport)).
+4. Web Search: No additional metadata is required; return the query as is.
+
+{format_instructions}
 """
             },
             

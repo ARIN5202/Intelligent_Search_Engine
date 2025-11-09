@@ -73,22 +73,19 @@ class Synthesizer:
     def __init__(
         self,
         api_key: str,
-        model: str = settings.deepseek_model,
-        base_url: str = settings.deepseek_url,
+        base_url: str = settings.azure_url,
         system_prompt: str | None = None,
         max_contexts: int = 8,
         max_context_chars: int = 12000,
     ) -> None:
         """
-        :param api_key: DeepSeek API Key
-        :param model:   DeepSeek 模型名，如 "deepseek-chat" / "deepseek-reasoner"
-        :param base_url: DeepSeek API base url
+        :param api_key: azure API Key
+        :param base_url: azure API base url
         :param system_prompt: 系统提示词，用于规范回答风格和使用上下文规则
         :param max_contexts: 最多使用多少条 context（再上游已经是 Top-k，这里是保险）
         :param max_context_chars: 拼接后的 context 字符总长上限，避免 prompt 过长
         """
         self.client = OpenAI(api_key=api_key, base_url=base_url)
-        self.model = model
         self.max_contexts = max_contexts
         self.max_context_chars = max_context_chars
 

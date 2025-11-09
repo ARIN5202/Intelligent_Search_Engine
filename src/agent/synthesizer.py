@@ -15,11 +15,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
-from config import Settings
+from config import Settings, get_settings
 from openai import OpenAI  # pip install openai
 
-from reranker import ContextDoc, RerankResult
+from .reranker import ContextDoc, RerankResult
 
+settings = get_settings()  # 获取配置实例
 
 @dataclass(slots=True)
 class SynthesizedResponse:
@@ -72,8 +73,8 @@ class Synthesizer:
     def __init__(
         self,
         api_key: str,
-        model: str = Settings.deepseek_model,
-        base_url: str = Settings.deepseek_url,
+        model: str = settings.deepseek_model,
+        base_url: str = settings.deepseek_url,
         system_prompt: str | None = None,
         max_contexts: int = 8,
         max_context_chars: int = 12000,

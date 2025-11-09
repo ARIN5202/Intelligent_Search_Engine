@@ -95,6 +95,9 @@ class Settings:
     deepseek_url: str
     deepseek_model: str
 
+    azure_api_key: Optional[str]
+    azure_url: str
+
     @classmethod
     def from_env(cls, env_file: Optional[Path | str] = None) -> "Settings":
         """Build a ``Settings`` instance using environment variables."""
@@ -140,6 +143,8 @@ class Settings:
             deepseek_api_key=os.environ.get("DEEPSEEK_API_KEY"),
             deepseek_url=os.environ.get("DEEPSEEK_URL"),
             deepseek_model=os.environ.get("DEEPSEEK_MODEL"),
+            azure_api_key=os.environ.get("AZURE_API_KEY"),
+            azure_url=os.environ.get("AZURE_URL"),
         )
 
     def ensure_directories(self) -> None:

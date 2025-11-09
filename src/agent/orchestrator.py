@@ -23,7 +23,7 @@ class AIAgent:
         self.router = Router()
         self.retrieval_manager = retrieval_manager
         self.reranker = Reranker()
-        # self.synthesizer = Synthesizer()
+        self.synthesizer = Synthesizer()
 
     def _retrieve_documents(self, routing_results: Dict[str, Any], analysis_results: Dict[str, Any]) -> Dict[str, Any]:
         """Retrieve documents based on routing results."""

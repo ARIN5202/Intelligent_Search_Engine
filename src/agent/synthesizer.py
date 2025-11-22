@@ -24,15 +24,27 @@ settings = get_settings()  # 获取配置实例
 
 @dataclass(slots=True)
 class SynthesizedResponse:
-    """
-    LLM 综合后的最终结果。
-    """
     query: str
     answer: str
-    contexts: List[ContextDoc]          # 实际用于生成回答的上下文（已过滤）
-    latency: float                     # LLM 调用耗时（秒）
+    contexts: List[ContextDoc]
+    latency: float
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def to_sources(self) -> List[Dict[str, Any]]:
+        """把 contexts 转成前端/CLI 用的 sources 列表."""
+        sources = []
+        for ctx in self.contexts:
+            score = ctx.rerank_score
+            if score is None:
+                score = ctx.retrieval_score
+            sources.append(
+                {
+                    "title": ctx.source,          # CLI 用的是 source['title']
+                    "score": score if score is not None else 0.0,
+                    "content": ctx.content,       # 你想展示的话也可以后面用
+                }
+            )
+        return sources
 
 def _filter_contexts(
         contexts: Sequence[ContextDoc],

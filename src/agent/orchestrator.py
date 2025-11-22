@@ -7,13 +7,15 @@ Using LangChain to orchestrate the components
 """
 
 import time, os
-from typing import Dict, Any
+import traceback
+from typing import Dict, Any, List
 from .query_analyzer import QueryAnalyzer
 from .router import Router
 from .reranker import Reranker
 from .synthesizer import Synthesizer
 from ..retrieval.manager import retrieval_manager
 from config import get_settings
+from .reranker import RerankResult
 
 settings = get_settings()
 
@@ -29,66 +31,85 @@ class AIAgent:
         self.reranker = Reranker()
         self.synthesizer = Synthesizer(deployment_name="gpt-4o")
 
-    def _retrieve_documents(self, routing_results: Dict[str, Any], analysis_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Retrieve documents based on routing results."""
-        try:
-            selected_tool = routing_results['selected_tool']
-            retrieval_metadata = routing_results['retrieval_metadata']
-            query = analysis_results['rewritten_query']
+    def _retrieve_documents(
+            self,
+            routing_results: Dict[str, Any],
+            analysis_results: Dict[str, Any],
+    ) -> RerankResult:
+        """Retrieve documents based on routing results and rerank them."""
+        start = time.time()
 
-            if selected_tool == 'transport':
+        # 安全一点地拿 query，避免 key 不存在直接 KeyError
+        query = (
+                analysis_results.get("rewritten_query")
+                or analysis_results.get("query")
+                or ""
+        )
+
+        try:
+            selected_tool = routing_results["selected_tool"]
+            retrieval_metadata = routing_results.get("retrieval_metadata", {})  # 防御性一点
+
+            if selected_tool == "transport":
                 retrieval_results = self.retrieval_manager.retrieve(
-                    name='transport',
+                    name="transport",
                     query=query,
-                    origin=retrieval_metadata['origin'],
-                    destination=retrieval_metadata['destination'],
-                    mode=retrieval_metadata['transit_mode'],
-                    top_k=10
+                    origin=retrieval_metadata["origin"],
+                    destination=retrieval_metadata["destination"],
+                    mode=retrieval_metadata["transit_mode"],
+                    top_k=10,
                 )
-            elif selected_tool == 'finance':
+            elif selected_tool == "finance":
                 retrieval_results = self.retrieval_manager.retrieve(
-                    name='finance',
+                    name="finance",
                     query=query,
-                    symbol=retrieval_metadata['ticker_symbol'],
-                    top_k=10
+                    symbol=retrieval_metadata["ticker_symbol"],
+                    top_k=10,
                 )
-            elif selected_tool == 'weather':
+            elif selected_tool == "weather":
                 retrieval_results = self.retrieval_manager.retrieve(
-                    name='weather',
+                    name="weather",
                     query=query,
-                    location=retrieval_metadata['location'],
-                    top_k=10
+                    location=retrieval_metadata["location"],
+                    top_k=10,
                 )
-            elif selected_tool == 'local_rag':
+            elif selected_tool == "local_rag":
                 retrieval_results = self.retrieval_manager.retrieve(
-                    name='local_rag',
+                    name="local_rag",
                     query=query,
-                    top_k=10
+                    top_k=10,
                 )
             else:
                 retrieval_results = self.retrieval_manager.retrieve(
-                    name='web_search',
+                    name="web_search",
                     query=query,
-                    top_k=10
+                    top_k=10,
                 )
-            
-            print(f"  - Retrieved {len(retrieval_results.documents)} documents using '{routing_results['selected_tool']} retriever'")
-            # for idx, doc in enumerate(retrieval_results.documents, start=1):
-            #     print(f"\n{idx}. Content = {doc.content}")
 
+            print(
+                f"  - Retrieved {len(retrieval_results.documents)} documents "
+                f"using '{selected_tool}' retriever"
+            )
             # Step 4: rerank the retrieved documents
-            # Rerank the retrieved documents
-            rerank_results = self.reranker.rerank_from_results(
+            rerank_results: RerankResult = self.reranker.rerank_from_results(
                 query=query,
                 retrieval_results=[retrieval_results],
-                top_k=5
+                top_k=5,
             )
 
             return rerank_results
-            
+
         except Exception as e:
-            print(f"⚠️ Retrieval and reranking failed: {e}")
-            return {'documents': []}
+            tool_name = routing_results.get("selected_tool", "unknown")
+            print(f"⚠️ Retrieval and reranking failed for '{tool_name}': {e}")
+            # 如果你想看更详细 trace，可以打开下面这行
+            # print(traceback.format_exc())
+
+            # ❗关键：异常时仍然返回 RerankResult，而不是 dict
+            return RerankResult(
+                query=query,
+                contexts=[],  # 空上下文
+            )
 
     def run(self, user_input: Dict[str, Any]) -> Any:
         """
@@ -167,15 +188,20 @@ class AIAgent:
                 query=analysis_results['rewritten_query'],
                 rerank_result=reranked_retrieval_results,
             )
-            print(f"✏️ Generated answer with {len(final_answer['sources'])} sources")
+
+            # 把上下文转换成 CLI 用的 sources 列表
+            sources = final_answer.to_sources()
+
+            print(f"✏️ Generated answer with {len(sources)} sources")
             print(f"⏱️ Total time: {time.time() - start_time:.2f} seconds")
             print("===========================")
 
             return {
-                'answer': f"Testing with query analyzer, routing, and retrieval module only.",
-                'sources': [],
-                'confidence': 1.0,
-                'analysis_results': analysis_results
+                "answer": final_answer.answer,
+                "sources": sources,
+                "confidence": 1.0,
+                "analysis_results": analysis_results,
+                "llm_metadata": final_answer.metadata,
             }
 
             # return {

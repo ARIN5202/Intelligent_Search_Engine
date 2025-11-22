@@ -31,18 +31,6 @@ class IntelligentAgentApp:
     async def start(self):
         """启动应用程序"""
         print("🚀 智能代理框架启动中...")
-        print(f"📋 配置信息: {config}")
-
-        # 健康检查
-        health_status = await self.agent.health_check()
-        print(f"🏥 组件健康状态: {health_status}")
-
-        # 检查是否有组件不健康
-        unhealthy_components = [comp for comp, status in health_status.items() if not status]
-        if unhealthy_components:
-            print(f"⚠️  警告：以下组件不健康: {unhealthy_components}")
-            print("某些功能可能受到影响")
-
         self.is_running = True
         print("✅ 智能代理框架启动完成！")
 

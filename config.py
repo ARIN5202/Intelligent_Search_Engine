@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from pydantic import SecretStr
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 _DEFAULT_ENV_FILENAMES = (".env",)
 
@@ -91,11 +93,7 @@ class Settings:
     llama_embedding_model: Optional[str]
     llama_device: Optional[str]
 
-    deepseek_api_key: Optional[str]
-    deepseek_url: str
-    deepseek_model: str
-
-    azure_api_key: Optional[str]
+    azure_api_key: SecretStr | None
     azure_url: str
 
     @classmethod
@@ -140,11 +138,8 @@ class Settings:
             user_agent=os.environ.get("USER_AGENT", "IntelligentSearchEngine/1.0"),
             llama_embedding_model=os.environ.get("LLAMA_EMBEDDING_MODEL"),
             llama_device=os.environ.get("LLAMA_DEVICE"),
-            deepseek_api_key=os.environ.get("DEEPSEEK_API_KEY"),
-            deepseek_url=os.environ.get("DEEPSEEK_URL"),
-            deepseek_model=os.environ.get("DEEPSEEK_MODEL"),
-            azure_api_key=os.environ.get("AZURE_API_KEY"),
-            azure_url=os.environ.get("AZURE_URL"),
+            azure_api_key=os.environ.get("AZURE_OPENAI_KEY"),
+            azure_url=os.environ.get("AZURE_OPENAI_ENDPOINT"),
         )
 
     def ensure_directories(self) -> None:

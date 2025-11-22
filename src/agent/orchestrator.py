@@ -13,6 +13,10 @@ from .router import Router
 from .reranker import Reranker
 from .synthesizer import Synthesizer
 from ..retrieval.manager import retrieval_manager
+from config import get_settings
+
+settings = get_settings()
+
 
 class AIAgent:
     """AI Agent Orchestrator"""
@@ -23,7 +27,7 @@ class AIAgent:
         self.router = Router()
         self.retrieval_manager = retrieval_manager
         self.reranker = Reranker()
-        self.synthesizer = Synthesizer()
+        self.synthesizer = Synthesizer(deployment_name="gpt-4o")
 
     def _retrieve_documents(self, routing_results: Dict[str, Any], analysis_results: Dict[str, Any]) -> Dict[str, Any]:
         """Retrieve documents based on routing results."""
@@ -159,8 +163,7 @@ class AIAgent:
             print("=" * 80)
 
             # Step 5: Synthesize final answer with rewritten query and reranked contexts
-            synthesizer = Synthesizer(api_key=os.getenv("DEEPSEEK_API_KEY"))
-            final_answer = synthesizer.synthesize(
+            final_answer = self.synthesizer.synthesize(
                 query=analysis_results['rewritten_query'],
                 rerank_result=reranked_retrieval_results,
             )

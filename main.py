@@ -10,7 +10,8 @@ import sys
 from pathlib import Path
 from typing import Optional, Iterable, Union
 from src.preprocessing.preprocessor import Preprocessor
-
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # 添加项目根目录到路径
 project_root = Path(__file__).parent
 sys.path.append(str(project_root))

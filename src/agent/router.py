@@ -24,8 +24,6 @@ from config import get_settings
 
 settings = get_settings()
 
-print(settings.azure_url, settings.azure_api_key)
-
 llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_url,
     api_key=settings.azure_api_key,

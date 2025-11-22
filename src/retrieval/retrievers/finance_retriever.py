@@ -40,9 +40,11 @@ class FinanceRetriever(BaseRetriever):
         symbol: Optional[str] = None,
         function: Optional[str] = None,
         params: Optional[Mapping[str, Any]] = None,
+        target_date: Optional[str] = None,
+        outputsize: Optional[str] = None,
         **_: Any,
     ):
-        """Query Alpha Vantage for a quote and map the response to the unified schema."""
+        """Query Alpha Vantage for quotes or time series and map to the unified schema."""
         ticker = (symbol or query).strip().upper()
         if not ticker:
             raise ValueError("A ticker symbol is required for finance queries.")
@@ -57,6 +59,8 @@ class FinanceRetriever(BaseRetriever):
         function_name = (function or self._default_function).strip()
 
         request_params: Dict[str, Any] = {"function": function_name, "symbol": ticker, "apikey": api_key}
+        if outputsize:
+            request_params["outputsize"] = outputsize
         if params:
             request_params.update(params)
 
@@ -68,16 +72,49 @@ class FinanceRetriever(BaseRetriever):
         response.raise_for_status()
         payload = response.json()
 
-        document = self._build_document(ticker, payload)
+        document = self._build_document(
+            ticker,
+            payload,
+            function_name=function_name,
+            target_date=target_date,
+        )
         metadata = {
             "requested_symbol": ticker,
             "function": function_name,
+            "target_date": target_date,
         }
         return [document], metadata
 
     @staticmethod
-    def _build_document(symbol: str, payload: Mapping[str, Any]) -> RetrievedDocument:
-        """Convert the quote response into a standardised document."""
+    def _build_document(
+        symbol: str,
+        payload: Mapping[str, Any],
+        *,
+        function_name: str,
+        target_date: Optional[str],
+    ) -> RetrievedDocument:
+        # 1) Try time series payloads first (historical)
+        ts = FinanceRetriever._extract_timeseries(payload)
+        if ts:
+            date_key, entry = FinanceRetriever._select_timeseries_entry(ts, target_date)
+            price = (
+                entry.get("5. adjusted close")
+                or entry.get("4. close")
+                or entry.get("1. open")
+                or entry.get("2. high")
+                or entry.get("3. low")
+            )
+            lines = [f"Symbol: {symbol}", f"Date: {date_key}"]
+            if price is not None:
+                lines.append(f"Price: {price}")
+            return RetrievedDocument(
+                content="\n".join(lines),
+                source="finance",
+                score=1.0,
+                metadata={"raw": payload, "date": date_key},
+            )
+
+        # 2) Fallback: real-time/global quote
         quote = FinanceRetriever._extract_quote(payload)
         if not quote:
             raise RuntimeError(f"Finance API response did not contain quote data for {symbol}.")
@@ -113,6 +150,32 @@ class FinanceRetriever(BaseRetriever):
         if isinstance(payload, Mapping):
             return payload  # type: ignore[return-value]
         return None
+
+    @staticmethod
+    def _extract_timeseries(payload: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
+        """Support Alpha Vantage TIME_SERIES_* responses."""
+        for key in (
+            "Time Series (Daily)",
+            "Time Series (Daily Adjusted)",
+            "Time Series (Digital Currency Daily)",
+            "Time Series (FX (Daily))",
+        ):
+            ts = payload.get(key)
+            if isinstance(ts, Mapping):
+                return ts  # type: ignore[return-value]
+        return None
+
+    @staticmethod
+    def _select_timeseries_entry(
+        ts: Mapping[str, Any], target_date: Optional[str]
+    ) -> tuple[str, Mapping[str, Any]]:
+        """Pick the requested date entry; default to the latest available."""
+        if target_date and target_date in ts:
+            return target_date, ts[target_date]  # type: ignore[index]
+
+        # choose the most recent date key
+        date_key = sorted(ts.keys(), reverse=True)[0]
+        return date_key, ts[date_key]  # type: ignore[index]
 
 
 __all__ = ["FinanceRetriever"]

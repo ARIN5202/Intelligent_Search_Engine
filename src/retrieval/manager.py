@@ -13,6 +13,9 @@ from .retrievers.transport_retriever import TransportRetriever
 from .retrievers.weather_retriever import WeatherRetriever
 from .retrievers.web_search_retriever import WebSearchRetriever
 from .retrievers.yfinance_retriever import YFinanceRetriever
+from .retrievers.hko_flw_retriever import HKOLocalForecastRetriever
+from .retrievers.hko_warnsum_retriever import HKOWarnSumRetriever
+from .retrievers.hko_rhrread_retriever import HKORhrreadRetriever
 
 
 @dataclass(slots=True)
@@ -49,6 +52,12 @@ class RetrievalManager:
         self.register(FinanceRetriever(self.settings))
         self.register(TransportRetriever(self.settings))
         self.register(YFinanceRetriever(self.settings))
+        self.register(AQHIRetriever(self.settings))
+        self.register(TCHKOTrackRetriever(self.settings))
+        self.register(TCHKOWarningRetriever(self.settings))
+        self.register(HKOLocalForecastRetriever(self.settings))
+        self.register(HKOWarnSumRetriever(self.settings))
+        self.register(HKORhrreadRetriever(self.settings))
 
     def register(self, retriever: BaseRetriever) -> None:
         """Attach a retriever instance to the manager."""

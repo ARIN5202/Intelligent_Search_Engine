@@ -13,14 +13,18 @@ from langchain_openai import AzureChatOpenAI
 # from langchain_deepseek import ChatDeepSeek
 from pydantic import BaseModel, Field
 from ..prompts.templates import PromptTemplates
+from config import get_settings
+
+settings = get_settings()
 
 # Initialize templates
 templates = PromptTemplates()
 
 # Azure OpenAI client initialization
 llm = AzureChatOpenAI(
+    azure_endpoint=settings.azure_url,
+    api_key=settings.azure_api_key,
     api_version="2025-02-01-preview",
-    deployment_name="gpt-4o-mini",
     temperature=0.3,
     max_tokens=1000,
 )

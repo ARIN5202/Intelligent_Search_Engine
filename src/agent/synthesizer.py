@@ -15,8 +15,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
-from config import Settings, get_settings
-from openai import OpenAI  # pip install openai
+from config import get_settings
+from openai import AzureOpenAI
 
 from .reranker import ContextDoc, RerankResult
 
@@ -57,14 +57,13 @@ def _filter_contexts(
             break
         selected.append(doc)
         used_chars += length
-
     return selected
 
 
 class Synthesizer:
     """
     用法：
-        synthesizer = Synthesizer(api_key=..., model="deepseek-chat")
+        synthesizer = Synthesizer(deployment_name="gpt-4o")
         final = synthesizer.synthesize(query, rerank_result, top_k=8)
 
     上层就拿 SynthesizedResponse.answer 给用户即可。
@@ -72,20 +71,29 @@ class Synthesizer:
 
     def __init__(
         self,
-        api_key: str,
-        base_url: str = settings.azure_url,
+        deployment_name: str = "gpt-4o",
+        api_key: str | None = None,
+        base_url: str | None = None,
         system_prompt: str | None = None,
         max_contexts: int = 8,
         max_context_chars: int = 12000,
     ) -> None:
         """
-        :param api_key: azure API Key
-        :param base_url: azure API base url
-        :param system_prompt: 系统提示词，用于规范回答风格和使用上下文规则
-        :param max_contexts: 最多使用多少条 context（再上游已经是 Top-k，这里是保险）
-        :param max_context_chars: 拼接后的 context 字符总长上限，避免 prompt 过长
+        :param deployment_name: Azure 部署名（deployment name），例如 "gpt-4o" / "gpt-4o-mini"
+        :param api_key: Azure OpenAI API Key（不传就用 settings.azure_api_key）
+        :param base_url: Azure endpoint 根地址（不传就用 settings.azure_url）
         """
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        endpoint = base_url or settings.azure_url
+        key = api_key or settings.azure_api_key
+
+        self.client = AzureOpenAI(
+            azure_endpoint=endpoint,
+            api_key=key,
+            api_version="2025-02-01-preview",
+        )
+
+        # 3) 之后 chat.completions.create 时用的 model = 部署名
+        self.model = deployment_name
         self.max_contexts = max_contexts
         self.max_context_chars = max_context_chars
 

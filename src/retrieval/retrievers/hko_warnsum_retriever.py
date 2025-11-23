@@ -13,7 +13,7 @@ class HKOWarnSumRetriever(BaseRetriever):
     """Fetch HKO warning summary (warnsum), surface tropical cyclone warning signals."""
 
     domain = [
-        "warning", "8", "typhone", "台风", "警告", "八号", "风球"
+        "tropical", "warning", "8", "typhone", "台风", "警告", "八号", "风球"
     ]
 
     description = (

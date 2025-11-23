@@ -5,7 +5,8 @@ Query Analyzer Module
 Responsible for analyzing user queries to enhance retrieval performance
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+import dateutil.parser as dparser
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers.pydantic import PydanticOutputParser
@@ -14,6 +15,7 @@ from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field
 from ..prompts.templates import PromptTemplates
 from config import get_settings
+import datetime
 
 settings = get_settings()
 
@@ -25,16 +27,38 @@ llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_url,
     api_key=settings.azure_api_key,
     api_version="2025-02-01-preview",
-    temperature=0.3,
-    max_tokens=1000,
 )
 
 class QueryOutput(BaseModel):
     """Schema for query analysis output"""
     keywords: List[str] = Field(description="Key terms extracted from the query")
-    query_type: str = Field(description="Type of query (e.g., factual, conceptual, procedural)")
-    domain_areas: List[str] = Field(description="Relevant domain areas for this query (e.g., finance, weather, transport, general)")
-    complexity: str = Field(description="Query complexity (easy, medium, hard)")
+    time_related: List[str] = Field(description="Time-related keywords extracted from the query (e.g., today, next Monday)")
+    domain_area: str = Field(description="The Most relevant domain area for this query (e.g., finance, typhone, weather, transport, general)")
+
+# Helper function to parse relative dates
+def parse_time_info(times: List[str]) -> List[Optional[str]]:
+    """
+    Convert a list of relative date expressions (e.g., 'next Monday') to specific dates.
+
+    Args:
+        times: List of relative date expressions.
+
+    Returns:
+        A list of strings representing the exact dates in ISO format (YYYY-MM-DD), or None if parsing fails.
+    """
+    parsed_dates = []
+    for time in times:
+        try:
+            if time.lower() in ["today", "tonight", "this evening", "this afternoon", "this morning"]:
+                parsed_date = datetime.datetime.now()
+            else:
+                parsed_date = dparser.parse(time, fuzzy=True)
+            formatted_date = parsed_date.strftime("%Y-%m-%d")
+            parsed_dates.append(formatted_date)
+        except Exception:
+            parsed_dates.append(None)
+    return parsed_dates
+        
 
 class QueryRewriter:
     """Component to rewrite queries for better analysis and retrieval"""
@@ -107,6 +131,7 @@ class IntentExtractor:
 
         except ValueError as e:
             raise ValueError(f"Missing required template: query_analysis.intent_extraction. Please add this template to templates.py: {e}")
+            
 
     def analyze(self, query: str, attachment_contents: list = None) -> Dict[str, Any]:
         """
@@ -124,21 +149,22 @@ class IntentExtractor:
             analysis_result = self.analysis_chain.invoke(
                 {
                     "query": query,
-                    "context": "\n".join(attachment_contents) if attachment_contents else ""   
+                    "context": "\n".join(attachment_contents) if attachment_contents else ""
                 }
             )
-            # print(f"Intent Extraction Result: {analysis_result}")
-            
+
+            # Parse the time-related keywords into exact dates or None
+            analysis_result.time_related = parse_time_info(analysis_result.time_related)
+
             # Return enhanced query and metadata
             return {
                 "original_query": '',
                 "rewritten_query": query,
                 "keywords": analysis_result.keywords,
-                "query_type": analysis_result.query_type,
-                "domain_areas": analysis_result.domain_areas,
-                "complexity": analysis_result.complexity,
+                "time_related": [date for date in analysis_result.time_related if date is not None],  # Filter out None values
+                "domain_area": analysis_result.domain_area,
             }
-        
+
         except Exception as e:
             print(f"ERROR INTENT EXTRACTION: {e}")
             # Return original query if analysis fails
@@ -146,9 +172,8 @@ class IntentExtractor:
                 "original_query": '',
                 "rewritten_query": '',
                 "keywords": [],
-                "query_type": "unknown",
-                "domain_areas": [],
-                "complexity": "unknown",
+                "time_related": [],
+                "domain_area": [],
             }
     
 
@@ -160,7 +185,7 @@ class QueryAnalyzer:
         self.query_rewriter = QueryRewriter()
         self.intent_extractor = IntentExtractor()
 
-    def analyze(self, query: str, attachment_contents:list, use_attachments=False) -> Dict[str, Any]:
+    def analyze(self, query: str, attachment_contents:list, use_attachments=True) -> Dict[str, Any]:
         """
         Complete query analysis pipeline: rewriting, intent analysis.
         
@@ -206,4 +231,3 @@ class QueryAnalyzer:
         except Exception as e:
             print(f"Health check failed: {e}")
         return False
-    

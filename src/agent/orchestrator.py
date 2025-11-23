@@ -183,7 +183,7 @@ class AIAgent:
             # Step 1: Perform query analysis
             print("\n🔍 **Step 1: Query Analysis**")
             analysis_start = time.time()
-            analysis_results = self.query_analyzer.analyze(query=query, attachment_contents=attachment_contents)
+            analysis_results = self.query_analyzer.analyze(query=raw_query, attachment_contents=attachment_contents)
             print(f"  - Rewritten Query: {analysis_results['rewritten_query']}")
             print(f"  - Keywords: {', '.join(analysis_results['keywords'])}")
             print(f"  - Time Related: {', '.join(analysis_results['time_related'])}")

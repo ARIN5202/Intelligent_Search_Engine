@@ -32,7 +32,7 @@ llm = AzureChatOpenAI(
 class QueryOutput(BaseModel):
     """Schema for query analysis output"""
     keywords: List[str] = Field(description="Key terms extracted from the query")
-    time_related: List[str] = Field(description="Time-related keywords extracted from the query (e.g., today, next Monday)")
+    time_related: List[str] = Field(description="Time-related keywords extracted from the query (e.g., today, next Monday, current, latest), if query is time-sensitive")
     domain_area: str = Field(description="The Most relevant domain area for this query (e.g., finance, typhone, weather, transport, general)")
 
 # Helper function to parse relative dates
@@ -49,7 +49,7 @@ def parse_time_info(times: List[str]) -> List[Optional[str]]:
     parsed_dates = []
     for time in times:
         try:
-            if time.lower() in ["today", "tonight", "this evening", "this afternoon", "this morning"]:
+            if time.lower() in ["today", "tonight", "this evening", "this afternoon", "this morning", "current", "now", "latest"]:
                 parsed_date = datetime.datetime.now()
             else:
                 parsed_date = dparser.parse(time, fuzzy=True)

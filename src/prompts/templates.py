@@ -17,7 +17,7 @@ class PromptTemplates:
             # Query analysis templates
             'query_analysis': {
                 'intent_extraction': """
-Please analyze the following user query to extract keywords, time-related keywords, domain area, complexity.
+Please analyze the following user query to extract keywords, time-related keywords, domain area.
 
 User Query: {query}
 Additional Context (if any): {context}
@@ -30,7 +30,7 @@ Important: For domain_area, if it can be handled by two or more domains, choose 
 Rewrite the following query to make it more effective for information retrieval.
 Maintain the original intent but make it more specific, clear, and search-friendly.
 
-Important: Keep original time-related word in the rewritten query (e.g, today, tomorrow, next Monday)!!
+Important: If query is time-sensitive, keep original time-related word in the rewritten query (e.g, today, tomorrow, next Monday, current, latest)!!
 
 Original query: {query}
 Additional context (if any, e.g., attachments): {context}

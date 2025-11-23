@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional, Iterable, Union
 from src.preprocessing.preprocessor import Preprocessor
 import os
+import argparse
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # 添加项目根目录到路径
 project_root = Path(__file__).parent
@@ -19,6 +20,11 @@ sys.path.append(str(project_root))
 import config
 from src.agent.orchestrator import AIAgent
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="智能代理框架")
+    parser.add_argument('--text', type=str, help="查询文本")
+    parser.add_argument('--attachments', type=str, help="附件路径", nargs='*')
+    return parser.parse_args()
 
 class IntelligentAgentApp:
     """智能代理应用程序"""
@@ -31,9 +37,7 @@ class IntelligentAgentApp:
 
     async def start(self):
         """启动应用程序"""
-        print("🚀 智能代理框架启动中...")
         self.is_running = True
-        print("✅ 智能代理框架启动完成！")
 
     async def stop(self):
         """停止应用程序"""
@@ -68,7 +72,6 @@ class IntelligentAgentApp:
 
             user_input = {
                 "raw_query": preprocess_result.raw_query,
-
                 # 结构化附件内容
                 "attachments": [
                     {"path": str(x.path), "type": x.source_type, "content": x.content}
@@ -103,7 +106,6 @@ class IntelligentAgentApp:
 
         while self.is_running:
             try:
-                # 获取用户输入
                 query = input("\n👤 请输入您的问题: ").strip()
 
                 # 检查退出命令
@@ -115,9 +117,16 @@ class IntelligentAgentApp:
                     print("❓ 请输入有效的问题")
                     continue
 
+                # 获取附件路径（用户可以输入附件路径）
+                attachments_input = input("\n请输入附件路径（如果有的话，多个路径用空格分隔，按 Enter 跳过）：").strip()
+
+                # 如果附件输入不为空，处理附件路径
+                attachments = [Path(att) for att in attachments_input.split()] if attachments_input else None
+                print(attachments)
+
                 # 处理查询
                 print(f"\n🔄 正在处理: {query}")
-                result = await self.process_query(query)
+                result = await self.process_query(query, attachments=attachments)
 
                 # 显示结果
                 print(f"\n🤖 回答:")
@@ -141,32 +150,6 @@ class IntelligentAgentApp:
             except Exception as e:
                 print(f"\n❌ 发生错误: {e}")
 
-    async def demo_mode(self):
-        """演示模式"""
-        print("\n🎯 演示模式：展示系统功能")
-        print("=" * 50)
-
-        demo_queries = [
-            "公司的考勤制度是什么？",
-            "北京今天的天气怎么样？",
-            "苹果公司的股票价格",
-            "从天安门到故宫怎么走？",
-            "人工智能的最新发展趋势"
-        ]
-
-        for i, query in enumerate(demo_queries, 1):
-            print(f"\n📝 演示查询 {i}: {query}")
-            result = await self.process_query(query)
-
-            print(f"🤖 回答: {result['answer'][:200]}...")
-            print(f"📊 置信度: {result['confidence']:.2f}")
-            print(f"📚 来源数量: {len(result['sources'])}")
-
-            # 等待一下再继续
-            await asyncio.sleep(1)
-
-        print("\n✅ 演示完成！")
-
 
 async def main():
     """主函数"""
@@ -176,29 +159,7 @@ async def main():
         # 启动应用
         await app.start()
 
-        # 检查命令行参数
-        if len(sys.argv) > 1:
-            mode = sys.argv[1].lower()
-
-            if mode == 'demo':
-                # 演示模式
-                await app.demo_mode()
-            elif mode == 'query' and len(sys.argv) > 2:
-                # 单次查询模式
-                query = ' '.join(sys.argv[2:])
-                print(f"🔄 处理单次查询: {query}")
-                result = await app.process_query(query)
-                print(f"问题: {query}")
-                print(f"回答: {result['answer']}")
-                print(f"置信度: {result['confidence']:.2f}")
-            else:
-                print("用法:")
-                print("  python main.py            # 交互模式")
-                print("  python main.py demo       # 演示模式")
-                print("  python main.py query 你的问题  # 单次查询")
-        else:
-            # 默认交互模式
-            await app.interactive_mode()
+        await app.interactive_mode()
 
     except KeyboardInterrupt:
         print("\n收到中断信号")

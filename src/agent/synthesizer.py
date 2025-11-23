@@ -11,6 +11,8 @@ Synthesizer - Step 5-6
 
 from __future__ import annotations
 
+import re
+from datetime import datetime
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
@@ -73,14 +75,6 @@ def _filter_contexts(
 
 
 class Synthesizer:
-    """
-    用法：
-        synthesizer = Synthesizer(deployment_name="gpt-4o")
-        final = synthesizer.synthesize(query, rerank_result, top_k=8)
-
-    上层就拿 SynthesizedResponse.answer 给用户即可。
-    """
-
     def __init__(
         self,
         deployment_name: str = "gpt-4o",
@@ -91,20 +85,15 @@ class Synthesizer:
         max_context_chars: int = 12000,
     ) -> None:
         """
-        :param deployment_name: Azure 部署名（deployment name），例如 "gpt-4o" / "gpt-4o-mini"
-        :param api_key: Azure OpenAI API Key（不传就用 settings.azure_api_key）
-        :param base_url: Azure endpoint 根地址（不传就用 settings.azure_url）
+        Initialize the Synthesizer with required parameters.
         """
         endpoint = base_url or settings.azure_url
         key = api_key or settings.azure_api_key
-
         self.client = AzureOpenAI(
             azure_endpoint=endpoint,
             api_key=key,
             api_version="2025-02-01-preview",
         )
-
-        # 3) 之后 chat.completions.create 时用的 model = 部署名
         self.model = deployment_name
         self.max_contexts = max_contexts
         self.max_context_chars = max_context_chars
@@ -114,38 +103,40 @@ class Synthesizer:
                 "You are a retrieval-augmented assistant. "
                 "You MUST carefully read the provided context snippets and "
                 "answer the user's question using them as primary evidence. "
-                "If the context is insufficient or conflicting, say so clearly "
-                "and reason cautiously."
+                "If the provided context contains relevant information (even if it is not real-time or perfectly matching), "
+                "use it to answer the user's request directly. "
+                "Do not start your response with refusals or apologies like 'I cannot provide'. "
+                "Instead, simply state: 'According to the data from [Date]...' or 'The available records show...'"
             )
         self.system_prompt = system_prompt
 
-
     def synthesize(
         self,
+        raw_query: str,
         query: str,
         rerank_result: RerankResult,
         top_k: Optional[int] = None,
     ) -> SynthesizedResponse:
         """
-        主入口：
-        - 从 RerankResult 中拿到排好序的 contexts
-        - 再做一次 Top-k / 长度过滤
-        - 调用 DeepSeek 生成最终回答
-        - 返回带 latency / usage 的结构化结果
+        Synthesize the final response based on query and contexts.
+        Now includes language detection to determine the response language.
         """
         if top_k is None:
             top_k = self.max_contexts
 
-        # 1) 上下文过滤（Top-k + 长度限制）
+        # 1) Filter contexts (Top-k + Length restriction)
         filtered_contexts = _filter_contexts(
             rerank_result.contexts,
             max_k=top_k,
             max_chars=self.max_context_chars,
         )
 
-        # 2) 构造 messages
-        messages = self._build_messages(query, filtered_contexts)
-        # 3) 调用 DeepSeek + 记录耗时
+        # 2) Detect the language of the raw query
+        detected_language = self._detect_language(raw_query)
+
+        # 3) Build messages with instructions for the language
+        messages = self._build_messages(query, filtered_contexts, detected_language)
+
         start = time.perf_counter()
         resp = self.client.chat.completions.create(
             model=self.model,
@@ -154,14 +145,14 @@ class Synthesizer:
         )
         elapsed = time.perf_counter() - start
 
-        # 4) 解析回答和 usage
+        # 4) Process the response
         choice = resp.choices[0]
         answer_text = choice.message.content or ""
 
+        # Collect usage information
         usage_info = {}
         usage = getattr(resp, "usage", None)
         if usage is not None:
-            # openai SDK 返回的是对象，这里稳妥一点 getattr
             usage_info = {
                 "prompt_tokens": getattr(usage, "prompt_tokens", None),
                 "completion_tokens": getattr(usage, "completion_tokens", None),
@@ -185,42 +176,79 @@ class Synthesizer:
 
     # ---------- Internal helpers ----------
 
+    def _detect_language(self, raw_query: str) -> str:
+        """
+        Detect the language of the raw_query using Regex.
+        Returns "zh" if CJK characters are found, otherwise "en".
+        """
+        if not raw_query:
+            return "en"
+
+        # Unicode range for CJK Unified Ideographs (covers most common Chinese characters)
+        # \u4e00-\u9fff is the standard range for CJK characters
+        pattern = re.compile(r'[\u4e00-\u9fff]')
+
+        if pattern.search(raw_query):
+            return "zh"
+        else:
+            return "en"
+
     def _build_messages(
-        self,
-        query: str,
-        contexts: Sequence[ContextDoc],
+            self,
+            query: str,
+            contexts: Sequence[ContextDoc],
+            detected_language: str,
     ) -> List[Dict[str, str]]:
         """
-        构造发给 DeepSeek 的 messages（OpenAI 风格）。
-        把所有 context 组合成一个用户侧提示的一部分。
+        Build messages with XML structure and clearer instructions.
         """
+        # 1. 获取当前时间，帮助 AI 理解 "今天", "最近" 等词
+        current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        # 把 context 格式化清晰，方便模型引用
+        # 2. 构建 Context Block (使用 XML 结构)
         if contexts:
-            ctx_lines: List[str] = []
+            doc_lines = []
             for i, c in enumerate(contexts, start=1):
-                src = c.source
-                score = (
-                    f" | rerank_score={c.rerank_score:.4f}"
-                    if c.rerank_score is not None
-                    else ""
-                )
-                ctx_lines.append(
-                    f"[{i}] (source={src}{score})\n{c.content.strip()}"
-                )
-            ctx_block = "\n\n".join(ctx_lines)
-        else:
-            ctx_block = "No external contexts were retrieved."
+                # 添加元数据，帮助 AI 判断信息的新旧和质量
+                meta_info = f'source="{c.source}"'
+                if c.rerank_score is not None:
+                    meta_info += f' score="{c.rerank_score:.4f}"'
 
+                # 使用 xml 标签包裹每个文档
+                doc_lines.append(
+                    f'<document index="{i}" {meta_info}>\n{c.content.strip()}\n</document>'
+                )
+            ctx_block = "\n".join(doc_lines)
+            # 外层再包一个 context 标签
+            full_context = f"<context>\n{ctx_block}\n</context>"
+        else:
+            full_context = "<context>\nNo external documents retrieved.\n</context>"
+
+        # 3. 根据语言调整指令 (更加具体的语气)
+        if detected_language == "zh":
+            lang_instruction = (
+                "请使用简体中文回答。\n"
+                "在回答中引用的事实，请在句尾标注来源索引，例如 [1]。"
+            )
+        else:
+            lang_instruction = (
+                "Please answer in English.\n"
+                "Cite your sources at the end of relevant sentences using brackets, e.g., [1]."
+            )
+
+        # 4. 构建最终 User Content
+        # 注意：将 Query 放在 Context 之后通常效果更好，符合阅读逻辑
         user_content = (
-            f"User Question:\n{query.strip()}\n\n"
-            f"Retrieved Contexts (use them as primary evidence when relevant):\n"
-            f"{ctx_block}\n\n"
-            "Instructions:\n"
-            "- First, infer the answer based on the contexts above.\n"
-            "- If multiple snippets conflict, explain the conflict and choose the most reliable.\n"
-            "- If key information is missing, explicitly say what is missing instead of fabricating.\n"
-            "- Answer in a clear, concise, and well-structured way."
+            f"Current Date: {current_time_str}\n\n"
+            f"{full_context}\n\n"
+            f"User Query: {query.strip()}\n\n"
+            f"Instructions:\n"
+            f"1. Analyze the documents in <context> to answer the User Query.\n"
+            f"2. Prioritize the information in the context over your internal knowledge.\n"
+            f"3. If the context is not perfectly matching (e.g., slight date difference), "
+            f"use the available info to provide the best possible answer, but mention the date/source strictly.\n"  # 关键修改：允许非完美匹配
+            f"4. Do NOT start with 'I cannot answer'. Go straight to the information you found.\n"
+            f"{lang_instruction}"
         )
 
         return [

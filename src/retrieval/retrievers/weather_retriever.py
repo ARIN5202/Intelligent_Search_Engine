@@ -153,6 +153,8 @@ class WeatherRetriever(BaseRetriever):
             dt_str = "N/A"
         conditions = entry.get("conditions")
         temp = entry.get("temp")
+        tempmax = entry.get("tempmax")
+        tempmin = entry.get("tempmin")
         feelslike = entry.get("feelslike")
         humidity = entry.get("humidity")
         wind = entry.get("windspeed")
@@ -163,6 +165,10 @@ class WeatherRetriever(BaseRetriever):
             lines.append(f"Conditions: {conditions}")
         if temp is not None:
             lines.append(f"Temperature: {temp} deg")
+        if tempmax is not None:
+            lines.append(f"Temp max: {tempmax} deg")
+        if tempmin is not None:
+            lines.append(f"Temp min: {tempmin} deg")
         if feelslike is not None:
             lines.append(f"Feels like: {feelslike} deg")
         if humidity is not None:

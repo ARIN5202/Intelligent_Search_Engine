@@ -28,9 +28,6 @@ llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_url,
     api_key=settings.azure_api_key,
     api_version="2025-02-01-preview",
-    deployment_name="gpt-4o-mini",
-    temperature=0.3,
-    max_tokens=1000,
 ) 
 
 class RoutingOutput(BaseModel):
@@ -41,7 +38,7 @@ class RoutingOutput(BaseModel):
     description: Optional[str] = Field(
         description="A brief description of the selected tool. If no tool is selected, this will be null."
     )
-    reasoning: str = Field(description="Overall reasoning for the tool selection.")
+    reasoning: str = Field(description="Overall reasoning for the tool selection for using with web search.")
 
 class RetrievalMetadataOutput(BaseModel):
     """Schema for retrieval metadata output"""
@@ -55,7 +52,7 @@ class Router:
     def __init__(self):
         """Initialize Router"""
         self.retrieval_manager = retrieval_manager
-        # self.model = SentenceTransformer("all-MiniLM-L6-v2")
+        self.model = SentenceTransformer("all-MiniLM-L6-v2")
         self.llm = llm
         self.routing_parser = PydanticOutputParser(pydantic_object=RoutingOutput)
         self.retrieval_metadata_parser = PydanticOutputParser(pydantic_object=RetrievalMetadataOutput)
@@ -65,7 +62,7 @@ class Router:
             template_content = PromptTemplates().get_template('routing', 'tool_selection')
             
             self.routing_template = PromptTemplate(
-                input_variables=["rewritten_query", "keywords", "domain_areas", "tool_descriptions"],
+                input_variables=["rewritten_query", "keywords", "domain_areas", "subquestions", "tool_descriptions"],
                 template=template_content
             )
             self.routing_template = self.routing_template.partial(
@@ -104,13 +101,15 @@ class Router:
             }
         return tool_info
 
-    def _extract_retrieval_metadata(self, retriever_name: str, query: str) -> Dict[str, Any]:
+    def _extract_retrieval_metadata(self, retriever_name: str, query: str, time_related: list) -> Dict[str, Any]:
         """
-        Extract the required information for the selected tool.
+        Extract the required information for the selected tool, including time-related metadata.
 
         Args:
             retriever_name: Name of the selected retriever
             query: The user query
+            time_related: List of time-related keywords (exact dates)
+
         Returns:
             A dictionary containing the extracted retrieval metadata.
         """
@@ -119,16 +118,17 @@ class Router:
             retrieval_metadata = self.retrieval_metadata_chain.invoke(
                 {
                     "tool_name": retriever_name,
-                    "query": query
+                    "query": query,
+                    "time_related": ", ".join(time_related)  # Pass time-related info
                 }
             )
-            return{
+            return {
                 **retrieval_metadata.required_fields
             }
         except Exception as e:
             print(f"ERROR RETRIEVAL METADATA EXTRACTION: {e}")
             return {}
-        
+
     def route(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
         """
         Analyze the query and return routing results
@@ -137,9 +137,8 @@ class Router:
             analysis_results: Results from the query analysis step, including:
                 - rewritten_query: The rewritten query string.
                 - keywords: Extracted keywords from the query.
-                - intent: The intent of the query.
-                - domain_areas: The domain(s) the query belongs to.
-                - complexity: The complexity of the query.
+                - domain_area: The domain the query belongs to.
+                - time_related: Extracted time-related keywords (exact dates).
 
         Returns:
             A dictionary containing:
@@ -154,44 +153,32 @@ class Router:
             # Extract the keywords from analysis results
             query = analysis_results.get("rewritten_query") or analysis_results.get("raw_query") or ""
             query_keywords = analysis_results.get("keywords", [])
-            query_domains = analysis_results.get("domain_areas", [])
+            query_domain = analysis_results.get("domain_area", "")
+            query_time_related = analysis_results.get("time_related", [])  # Include time-related keywords
 
             # Initialize routing variables
             best_tool = None
             reasoning = ""
             retrieval_metadata = {}
 
-            # 1) quick word matching based on domains
+            # 1. Quick Exact Word Match based on domains, keywords, and time-related information
             for tool_name, info in tool_info.items():
-                tool_domains = info.get("domains", [])
-                # print(f"Checking tool '{tool_name}' with domains {tool_domains} against query domains {query_domains}")
-                if any(domain.lower() in tool_domains for domain in query_domains):
+                tool_domains = [domain.lower() for domain in info.get("domains", [])]
+                # Combine query_domains and query_keywords for matching
+                query_terms = query_terms = [term.lower() for term in query_keywords] + [query_domain.lower()]
+                # Check if any query term matches tool domains
+                if any(term in tool_domains for term in query_terms):
                     best_tool = tool_name
-                    reasoning = f"Exact domain match found for tool '{best_tool}'."
+                    reasoning = f"Match found for tool '{best_tool}' based on keywords, domains, or time-related information."
 
                     retrieval_metadata = self._extract_retrieval_metadata(
                         retriever_name=best_tool,
-                        query=query
+                        query=query,
+                        time_related=query_time_related  # Pass time-related info
                     )
                     break
 
-            # # 2) semantic matching with embeddings if no exact match
-            # if not best_tool:
-            #     q_emb = self.model.encode(query, convert_to_tensor=True)
-            #     scores = {}
-            #     for tool_name, info in tool_info.items():
-            #         tool_emb = self.model.encode(" ".join(info.get("domains", [])), convert_to_tensor=True)
-            #         sim = util.cos_sim(q_emb, tool_emb).item()
-            #         scores[tool_name] = sim
-
-            #     # Select tools with similarity above threshold
-            #     sorted_tools = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-            #     top_tool, top_score = sorted_tools[0] if sorted_tools else (None, 0.0)
-            #     if top_score >= 0.5:  # similarity threshold
-            #         best_tool = top_tool
-            #         reasoning = f"Semantic match found for tool '{best_tool}' with similarity {top_score:.2f}."
-
-            # 3) fallback to LLM classification if still ambiguous
+            # 2) fallback to LLM classification if still ambiguous
             if not best_tool:
                 tool_descriptions = ", ".join([f"{name}: {info['description']}" for name, info in tool_info.items()])
 
@@ -200,7 +187,7 @@ class Router:
                         "rewritten_query": query,
                         "tool_descriptions": tool_descriptions,
                         "keywords": ", ".join(query_keywords),
-                        "domain_areas": ", ".join(query_domains),
+                        "domain_area": query_domain,
                     }
                 )
 
@@ -209,25 +196,24 @@ class Router:
                     best_tool = routing_result.selected_tool
                     retrieval_metadata = self._extract_retrieval_metadata(
                         retriever_name=best_tool,
-                        query=query
+                        query=query,
+                        time_related=query_time_related  # Pass time-related info
                     )
                     reasoning = routing_result.reasoning
             
             if not best_tool:
-                best_tool = "web_search"
+                best_tool = None
                 reasoning = "No suitable tool found; defaulting to 'web_search'."
             
             return {
-                "selected_tool": best_tool,
+                "selected_tools": [best_tool] if best_tool else [],
                 "reasoning": reasoning,
                 "retrieval_metadata": retrieval_metadata
             }
 
         except Exception as e:
             return {
-                "selected_tool": "web_search",
-                # "confidence_scores": {"local_rag": 0.0},
-                # "top_k": 10,
+                "selected_tools": [],
                 "reasoning": f"Error in routing: {e}. Defaulting to 'web_search'.",
                 "retrieval_metadata": {}
             }

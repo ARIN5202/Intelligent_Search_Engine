@@ -9,6 +9,10 @@ from typing import Iterable, List, Optional, Tuple, Union
 import os
 os.environ['TESSDATA_PREFIX'] = '/opt/anaconda3/envs/NLP1/share/tessdata'
 from pydantic import BaseModel
+from openai import AzureOpenAI
+from config import get_settings
+
+settings = get_settings()
 
 # --- Optional Dependencies ---
 try:
@@ -61,6 +65,7 @@ class AttachmentIssue(BaseModel):
 @dataclass
 class PreprocessResult:
     raw_query: str
+    processed_query: str
     pdf_attachments: List[AttachmentText]
     image_attachments: List[AttachmentText]
     issues: List[AttachmentIssue]
@@ -237,6 +242,44 @@ def _extract_image(path: Path, ocr_lang: str) -> Tuple[Optional[AttachmentText],
         )
 
 
+def _translate_zh_to_en(self, text: str) -> str:
+    """
+    使用 Azure OpenAI (gpt-4o 部署) 把繁体中文翻译成英文。
+    如果 text 已经是英文，调用方可以先用 _contains_chinese 判断再决定要不要调用。
+    """
+    text = text.strip()
+    if not text:
+        return text
+
+    try:
+        # 直接使用类中已初始化的 self.client
+        response = self.client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a translation engine. "
+                        "Translate the user's message from Traditional Chinese to natural English. "
+                        "If the text is already in English, return it unchanged. "
+                        "Do not add explanations or comments; return only the translation."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": text,
+                },
+            ],
+            temperature=0.0,  # 翻译用 0 温度，保证稳定
+        )
+        translated = response.choices[0].message.content.strip()
+        return translated
+    except Exception as e:
+        # 如果翻译失败，返回原文并记录错误
+        print(f"[WARN] Azure translation failed: {e}")
+        return "[TRANSLATION FAILED]"  # 你可以选择返回一个标识失败的文本或日志
+
+
 # --- Main Preprocessor ---
 class Preprocessor:
     image_exts: set[str] = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"}
@@ -249,11 +292,29 @@ class Preprocessor:
             - 其他（如 "eng", "chi_tra", "chi_tra+eng"）：固定语言，速度更快。
         """
         self.ocr_lang = ocr_lang
+        self.client = AzureOpenAI(
+            azure_endpoint=settings.azure_url,
+            api_key=settings.azure_api_key,
+            api_version="2025-02-01-preview",
+        )
 
     def process(self, query: str, attachments: Optional[Iterable[Union[str, Path]]] = None) -> PreprocessResult:
         pdf_attachments: List[AttachmentText] = []
         image_attachments: List[AttachmentText] = []
         issues: List[AttachmentIssue] = []
+
+        try:
+            # 总是将输入翻译成英文
+            processed_query = _translate_zh_to_en(self, text=query)
+        except Exception as e:
+            # 如果翻译失败，返回原始文本并记录失败
+            processed_query = query
+            issues.append(AttachmentIssue(
+                path=Path("<query>"),
+                code=IssueCode.READ_ERROR,
+                message=f"Failed to translate query from Chinese to English: {e}",
+                source_type=None,
+            ))
 
         for raw_path in (attachments or []):
             path = Path(raw_path)
@@ -292,6 +353,7 @@ class Preprocessor:
 
         return PreprocessResult(
             raw_query=query,
+            processed_query=processed_query,
             pdf_attachments=pdf_attachments,
             image_attachments=image_attachments,
             issues=issues,

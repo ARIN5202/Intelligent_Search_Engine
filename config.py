@@ -82,6 +82,13 @@ class Settings:
 
     weather_api_url: str
     weather_api_key: Optional[str]
+    weather_onecall_url: Optional[str]
+    visualcrossing_api_url: Optional[str]
+    visualcrossing_api_key: Optional[str]
+    hko_tc_track_url: Optional[str]
+    hko_warning_url: Optional[str]
+    hko_weather_api_url: Optional[str]
+    aqhi_api_url: Optional[str]
 
     finance_api_url: str
     finance_api_key: Optional[str]
@@ -131,6 +138,30 @@ class Settings:
             web_search_auth_prefix=os.environ.get("WEB_SEARCH_AUTH_PREFIX", "Bearer "),
             weather_api_url=os.environ.get("WEATHER_API_URL"),
             weather_api_key=os.environ.get("WEATHER_API_KEY"),
+            weather_onecall_url=os.environ.get(
+                "WEATHER_ONECALL_URL", "https://api.openweathermap.org/data/3.0/onecall"
+            ),
+            visualcrossing_api_url=os.environ.get(
+                "VISUALCROSSING_API_URL",
+                "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline",
+            ),
+            visualcrossing_api_key=os.environ.get("VISUALCROSSING_API_KEY"),
+            hko_tc_track_url=os.environ.get(
+                "HKO_TC_TRACK_URL",
+                "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=TCTrack&lang=en",
+            ),
+            hko_warning_url=os.environ.get(
+                "HKO_WARNING_URL",
+                "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=warningInfo&lang=en",
+            ),
+            hko_weather_api_url=os.environ.get(
+                "HKO_WEATHER_API_URL",
+                "https://data.weather.gov.hk/weatherAPI/opendata/weather.php",
+            ),
+            aqhi_api_url=os.environ.get(
+                "AQHI_API_URL",
+                "https://dashboard.data.gov.hk/api/aqhi-individual",
+            ),
             finance_api_url=os.environ.get("FINANCE_API_URL"),
             finance_api_key=os.environ.get("FINANCE_API_KEY"),
             transport_api_url=os.environ.get("TRANSPORT_API_URL"),

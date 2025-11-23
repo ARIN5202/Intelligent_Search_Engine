@@ -162,49 +162,50 @@ class Router:
             retrieval_metadata = {}
 
             # 1. Quick Exact Word Match based on domains, keywords, and time-related information
-            for tool_name, info in tool_info.items():
-                tool_domains = [domain.lower() for domain in info.get("domains", [])]
-                # Combine query_domains and query_keywords for matching
-                query_terms = query_terms = [term.lower() for term in query_keywords] + [query_domain.lower()]
-                # Check if any query term matches tool domains
-                if any(term in tool_domains for term in query_terms):
-                    best_tool = tool_name
-                    reasoning = f"Match found for tool '{best_tool}' based on keywords, domains, or time-related information."
+            if query_domain != "general":
+                for tool_name, info in tool_info.items():
+                    tool_domains = [domain.lower() for domain in info.get("domains", [])]
+                    # Combine query_domains and query_keywords for matching
+                    query_terms = query_terms = [term.lower() for term in query_keywords] + [query_domain.lower()]
+                    # Check if any query term matches tool domains
+                    if any(term in tool_domains for term in query_terms):
+                        best_tool = tool_name
+                        reasoning = f"Match found for tool '{best_tool}' based on keywords, domains, or time-related information."
 
-                    retrieval_metadata = self._extract_retrieval_metadata(
-                        retriever_name=best_tool,
-                        query=query,
-                        time_related=query_time_related  # Pass time-related info
+                        retrieval_metadata = self._extract_retrieval_metadata(
+                            retriever_name=best_tool,
+                            query=query,
+                            time_related=query_time_related  # Pass time-related info
+                        )
+                        break
+
+                # 2) fallback to LLM classification if still ambiguous
+                if not best_tool:
+                    tool_descriptions = ", ".join([f"{name}: {info['description']}" for name, info in tool_info.items()])
+
+                    routing_result = self.routing_chain.invoke(
+                        {
+                            "rewritten_query": query,
+                            "tool_descriptions": tool_descriptions,
+                            "keywords": ", ".join(query_keywords),
+                            "domain_area": query_domain,
+                        }
                     )
-                    break
 
-            # 2) fallback to LLM classification if still ambiguous
-            if not best_tool:
-                tool_descriptions = ", ".join([f"{name}: {info['description']}" for name, info in tool_info.items()])
-
-                routing_result = self.routing_chain.invoke(
-                    {
-                        "rewritten_query": query,
-                        "tool_descriptions": tool_descriptions,
-                        "keywords": ", ".join(query_keywords),
-                        "domain_area": query_domain,
-                    }
-                )
-
-                # Validate the routing results
-                if routing_result.selected_tool:
-                    best_tool = routing_result.selected_tool
-                    retrieval_metadata = self._extract_retrieval_metadata(
-                        retriever_name=best_tool,
-                        query=query,
-                        time_related=query_time_related  # Pass time-related info
-                    )
-                    reasoning = routing_result.reasoning
+                    # Validate the routing results
+                    if routing_result.selected_tool:
+                        best_tool = routing_result.selected_tool
+                        retrieval_metadata = self._extract_retrieval_metadata(
+                            retriever_name=best_tool,
+                            query=query,
+                            time_related=query_time_related  # Pass time-related info
+                        )
+                        reasoning = routing_result.reasoning
             
             if not best_tool:
                 best_tool = None
                 reasoning = "No suitable tool found; defaulting to 'web_search'."
-            
+
             return {
                 "selected_tools": [best_tool] if best_tool else [],
                 "reasoning": reasoning,

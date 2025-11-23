@@ -103,6 +103,8 @@ class Settings:
     azure_api_key: SecretStr | None
     azure_url: str
 
+    api_key: str | None
+
     @classmethod
     def from_env(cls, env_file: Optional[Path | str] = None) -> "Settings":
         """Build a ``Settings`` instance using environment variables."""
@@ -171,6 +173,7 @@ class Settings:
             llama_device=os.environ.get("LLAMA_DEVICE"),
             azure_api_key=os.environ.get("AZURE_OPENAI_KEY"),
             azure_url=os.environ.get("AZURE_OPENAI_ENDPOINT"),
+            api_key=os.environ.get("API_KEY"),
         )
 
     def ensure_directories(self) -> None:

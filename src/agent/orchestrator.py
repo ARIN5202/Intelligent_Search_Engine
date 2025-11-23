@@ -6,9 +6,8 @@ Coordinates and manages the entire QA workflow as the brain of the system/APP
 Using LangChain to orchestrate the components
 """
 
-import time, os
-import traceback
-from typing import Dict, Any, List
+import time
+from typing import Dict, Any
 from .query_analyzer import QueryAnalyzer
 from .router import Router
 from .reranker import Reranker
@@ -47,48 +46,77 @@ class AIAgent:
         )
 
         try:
-            selected_tool = routing_results["selected_tool"]
+            selected_tools = routing_results["selected_tools"]
             retrieval_metadata = routing_results.get("retrieval_metadata", {})  # 防御性一点
 
-            if selected_tool == "transport":
-                retrieval_results = self.retrieval_manager.retrieve(
-                    name="transport",
-                    query=query,
-                    origin=retrieval_metadata["origin"],
-                    destination=retrieval_metadata["destination"],
-                    mode=retrieval_metadata["transit_mode"],
-                    top_k=10,
-                )
-            elif selected_tool == "finance":
-                retrieval_results = self.retrieval_manager.retrieve(
-                    name="finance",
-                    query=query,
-                    symbol=retrieval_metadata["ticker_symbol"],
-                    top_k=10,
-                )
-            elif selected_tool == "weather":
-                retrieval_results = self.retrieval_manager.retrieve(
-                    name="weather",
-                    query=query,
-                    location=retrieval_metadata["location"],
-                    top_k=10,
-                )
-            elif selected_tool == "local_rag":
-                retrieval_results = self.retrieval_manager.retrieve(
-                    name="local_rag",
-                    query=query,
-                    top_k=10,
-                )
-            else:
-                retrieval_results = self.retrieval_manager.retrieve(
-                    name="web_search",
-                    query=query,
-                    top_k=10,
-                )
+            # Call web search retriever as the base
+            web_search_results = self.retrieval_manager.retrieve(
+                name="web_search",
+                query=query,
+                top_k=10,
+            )
+            retrieval_results = web_search_results 
+
+            # Call specialized retrievers if any selected
+            if len(selected_tools) > 1:
+                specialized_tool = selected_tools[0]
+                tool_retrievals = []
+                if specialized_tool == "transport":
+                    tool_retrievals.append(self.retrieval_manager.retrieve(
+                        name="transport",
+                        query=query,
+                        origin=retrieval_metadata["origin"],
+                        destination=retrieval_metadata["destination"],
+                        mode=retrieval_metadata["transit_mode"],
+                        top_k=10,
+                    ))
+                elif specialized_tool == "finance":
+                    for ticker in retrieval_metadata["ticker_symbols"]:
+                        # if in shenzhen, add these
+                        import os
+                        proxy = 'http://127.0.0.1:7890'
+                        os.environ['HTTP_PROXY'] = proxy
+                        os.environ['HTTPS_PROXY'] = proxy
+                        tool_retrievals.append(self.retrieval_manager.retrieve(
+                            name="finance_yf",
+                            query=query,
+                            symbol=ticker,
+                            period=retrieval_metadata.get("period", None),
+                            start_date=retrieval_metadata.get("start_date", None),
+                            end_date=retrieval_metadata.get("end_date", None),
+                            top_k=10,
+                        ))
+                        print(f"  - Retrieved {len(tool_retrievals[-1].documents)} finance data for ticker: {ticker}")
+                elif specialized_tool == "weather":
+                    tool_retrievals.append(self.retrieval_manager.retrieve(
+                        name="weather",
+                        query=query,
+                        location=retrieval_metadata["location"],
+                        mode=retrieval_metadata.get("mode", "daily"),   
+                        at=retrieval_metadata.get("target_time", None),
+                        top_k=10,
+                    ))
+                elif specialized_tool == "hko_warnsum":
+                    tool_retrievals.append(self.retrieval_manager.retrieve(
+                        name="hko_warnsum",
+                        query=query,
+                        top_k=10,
+                    ))
+                elif specialized_tool == "local_rag":
+                    tool_retrievals.append(self.retrieval_manager.retrieve(
+                        name="local_rag",
+                        query=query,
+                        top_k=10,
+                    ))
+                
+                if tool_retrievals:
+                    for retrieval in tool_retrievals:
+                        retrieval_results.documents.extend(retrieval.documents)
+
 
             print(
                 f"  - Retrieved {len(retrieval_results.documents)} documents "
-                f"using '{selected_tool}' retriever"
+                f"using '{', '.join(selected_tools)}' retriever(s)"
             )
             # Step 4: rerank the retrieved documents
             rerank_results: RerankResult = self.reranker.rerank_from_results(
@@ -100,7 +128,7 @@ class AIAgent:
             return rerank_results
 
         except Exception as e:
-            tool_name = routing_results.get("selected_tool", "unknown")
+            tool_name = routing_results.get("selected_tools", ["unknown"])
             print(f"⚠️ Retrieval and reranking failed for '{tool_name}': {e}")
             # 如果你想看更详细 trace，可以打开下面这行
             # print(traceback.format_exc())
@@ -134,8 +162,16 @@ class AIAgent:
             raw_query = user_input["raw_query"]
             query = user_input.get("processed_query", "")
             attachments = user_input.get("attachments", [])
-            attachment_contents = [att.get('content', '') for att in attachments]
+            print(user_input)
 
+            # Process attachments if provided
+            if attachments:
+                attachment_contents = [att.get("content", "") for att in attachments if att.get("content")]
+                image_paths = [att.get("path", "") for att in attachments if att.get("type") == "image" and att.get("path")]
+            else:
+                attachment_contents = []
+                image_paths = []
+           
             print("\n📥 **Input Details:**")
             print(f"  - Raw Query: {raw_query}")
             print(f"  - Number of Attachments: {len(attachments)}")
@@ -149,10 +185,9 @@ class AIAgent:
             analysis_start = time.time()
             analysis_results = self.query_analyzer.analyze(query=query, attachment_contents=attachment_contents)
             print(f"  - Rewritten Query: {analysis_results['rewritten_query']}")
-            # print(f"  - Keywords: {', '.join(analysis_results['keywords'])}")
-            # print(f"  - Query Type: {analysis_results['query_type']}")
-            print(f"  - Complexity: {analysis_results['complexity']}")
-            print(f"  - Domain Areas: {', '.join(analysis_results['domain_areas'])}")
+            print(f"  - Keywords: {', '.join(analysis_results['keywords'])}")
+            print(f"  - Time Related: {', '.join(analysis_results['time_related'])}")
+            print(f"  - Domain Area: {analysis_results['domain_area']}")
 
             print("\n⏱️ **Processing Time:**")
             print(f"  - Query Analysis Time: {time.time() - analysis_start:.2f}s")
@@ -163,7 +198,8 @@ class AIAgent:
             print("\n🔀 **Step 2: Routing**")
             routing_start = time.time()
             routing_results = self.router.route(analysis_results)
-            print(f"  - Routing to: {routing_results['selected_tool']} retriever")
+            routing_results["selected_tools"].append("web_search")  # Always include web search as a fallback
+            print(f"  - Routing to: {', '.join(routing_results['selected_tools'])} retriever(s)")
             print(f"  - Reasoning: {routing_results['reasoning']}")
             print(f"  - Retriever Metadata: {routing_results['retrieval_metadata']}")
 

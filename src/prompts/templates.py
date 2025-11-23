@@ -17,19 +17,20 @@ class PromptTemplates:
             # Query analysis templates
             'query_analysis': {
                 'intent_extraction': """
-Please analyze the following user query to extract intent, keywords, domain areas, complexity.
+Please analyze the following user query to extract keywords, time-related keywords, domain area, complexity.
 
 User Query: {query}
 Additional Context (if any): {context}
 
 {format_instructions}
+Important: For domain_area, if it can be handled by two or more domains, choose the most relevant one (e.g., Typhone Signal No.8 -> pick typhone).
 """,
 
                 'query_rewriting': """
 Rewrite the following query to make it more effective for information retrieval.
 Maintain the original intent but make it more specific, clear, and search-friendly.
 
-Important: Do not replace words like "current" with specific values (e.g., years) unless explicitly instructed.
+Important: Keep original time-related word in the rewritten query (e.g, today, tomorrow, next Monday)!!
 
 Original query: {query}
 Additional context (if any, e.g., attachments): {context}
@@ -41,13 +42,14 @@ Rewritten query:
             # Routing templates
             'routing': {
                 'tool_selection': """
-You are an intelligent routing agent responsible for selecting the most appropriate tools for processing a user query. 
-Analyze the query and its metadata, and choose the most suitable tool. Provide a clear justification for the selection.
+You are an intelligent routing agent responsible for selecting an extra specialized retriever can be combined with web search for processing a user query. 
+Analyze the query and its metadata carefully to decide the most appropriate retriever. 
+The specialized retriever may not directly answer the query but can provide additional information or context to improve the web search process.
 
 ### Input Details:
 - Rewritten Query: {rewritten_query}
 - Keywords: {keywords}
-- Domain Areas: {domain_areas}
+- Domain Area: {domain_area}
 
 ### Available Tools:
 {tool_descriptions}
@@ -60,12 +62,13 @@ You are an intelligent assistant tasked with extracting specific metadata from a
 ### Input Details:
 - Selected Tool: {tool_name}
 - User Query: {query}
+- Time-Related Keywords: {time_related}
 
 ### Tool-Specific Metadata Requirements:
-1. Finance: Extract the ticker symbol (e.g., AAPL, TSLA).
-2. Weather: Extract the location (e.g., city, country, or area name).
+1. Finance: Extract the ticker symbol(s) (e.g., AAPL), period (e.g. 5d, 1mo, 1y) or start and end date (e.g., 2023-01-01) if mentioned.
+2. Weather: Extract the location (e.g., city), mode (current (for now) or hourly/daily), target time (2025-11-23/tommorrow/today afternoon) if mentioned.
+3. HKO_WarnSum: No specific metadata extraction required.
 3. Transport: Extract the origin, destination, and transit mode (e.g., driving, walking, bicycling, transit (for public transport)).
-4. Web Search: No additional metadata is required; return the query as is.
 
 {format_instructions}
 """

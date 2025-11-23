@@ -6,7 +6,8 @@ from enum import Enum
 from pathlib import Path
 from statistics import mean
 from typing import Iterable, List, Optional, Tuple, Union
-
+import os
+os.environ['TESSDATA_PREFIX'] = '/opt/anaconda3/envs/NLP1/share/tessdata'
 from pydantic import BaseModel
 
 # --- Optional Dependencies ---

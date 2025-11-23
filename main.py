@@ -12,6 +12,9 @@ from typing import Optional, Iterable, Union
 from src.preprocessing.preprocessor import Preprocessor
 import os
 import argparse
+import textwrap
+import sys
+import time
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # 添加项目根目录到路径
 project_root = Path(__file__).parent
@@ -72,13 +75,14 @@ class IntelligentAgentApp:
 
             user_input = {
                 "raw_query": preprocess_result.raw_query,
-                # 结构化附件内容
+
+                "processed_query": preprocess_result.processed_query,
+
                 "attachments": [
                     {"path": str(x.path), "type": x.source_type, "content": x.content}
                     for x in (preprocess_result.pdf_attachments + preprocess_result.image_attachments)
                 ],
 
-                # 把 issues 也传下去，让 agent 决定是否提示用户或降级
                 "attachment_issues": [i.model_dump() for i in preprocess_result.issues],
             }
 
@@ -122,7 +126,6 @@ class IntelligentAgentApp:
 
                 # 如果附件输入不为空，处理附件路径
                 attachments = [Path(att) for att in attachments_input.split()] if attachments_input else None
-                print(attachments)
 
                 # 处理查询
                 print(f"\n🔄 正在处理: {query}")
@@ -130,7 +133,14 @@ class IntelligentAgentApp:
 
                 # 显示结果
                 print(f"\n🤖 回答:")
-                print(f"{result['answer']}")
+                wrapped_lines = textwrap.wrap(result['answer'], width=60)
+
+                for line in wrapped_lines:
+                    for char in line:
+                        sys.stdout.write(char)
+                        sys.stdout.flush()
+                        time.sleep(0.02)  # 控制打字速度，越小越快
+                    sys.stdout.write('\n')  # 每行结束后换行
 
                 if result['sources']:
                     print(f"\n📚 参考来源:")

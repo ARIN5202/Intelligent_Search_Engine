@@ -131,12 +131,13 @@ class AIAgent:
             start_time = time.time()
             
             # Extract query and context (parsed by pre-processing step)
-            query = user_input.get("raw_query", "")
+            raw_query = user_input["raw_query"]
+            query = user_input.get("processed_query", "")
             attachments = user_input.get("attachments", [])
             attachment_contents = [att.get('content', '') for att in attachments]
 
             print("\n📥 **Input Details:**")
-            print(f"  - Raw Query: {query}")
+            print(f"  - Raw Query: {raw_query}")
             print(f"  - Number of Attachments: {len(attachments)}")
             if attachments:
                 print("  - Attachment Details:")
@@ -185,6 +186,7 @@ class AIAgent:
 
             # Step 5: Synthesize final answer with rewritten query and reranked contexts
             final_answer = self.synthesizer.synthesize(
+                raw_query=raw_query,
                 query=analysis_results['rewritten_query'],
                 rerank_result=reranked_retrieval_results,
             )

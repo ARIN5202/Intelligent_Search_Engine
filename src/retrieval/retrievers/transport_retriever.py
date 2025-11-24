@@ -12,7 +12,7 @@ from .base_retriever import BaseRetriever, RetrievedDocument
 class TransportRetriever(BaseRetriever):
     """Retrieve transport options between an origin and destination."""
     domain = [
-        "transport", "交通", "路线", "导航", "地图", "map", "navigation",
+        "transport", "transportation", "route", "交通", "路线", "导航", "地图", "map", "navigation",
         "怎么去", "怎么走", "how to get to",
         "开车", "驾驶", "driving",
         "公交", "地铁", "public transport",

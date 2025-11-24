@@ -170,7 +170,7 @@ class Router:
                     # Check if any query term matches tool domains
                     if any(term in tool_domains for term in query_terms):
                         best_tool = tool_name
-                        reasoning = f"Match found for tool '{best_tool}' based on keywords, domains, or time-related information."
+                        reasoning = f"Exact Word Match found for tool '{best_tool}'."
 
                         retrieval_metadata = self._extract_retrieval_metadata(
                             retriever_name=best_tool,

@@ -14,6 +14,10 @@ from .base_retriever import BaseRetriever, RetrievedDocument
 class WeatherRetriever(BaseRetriever):
     """Fetch weather information (current/hourly/daily) for a given location."""
 
+    domain = [
+        "weather", "forecast", "temperature", "humidity", "rain", "snow", "climate", "wind", "storm"
+    ]
+
     def __init__(
         self,
         settings: Settings,

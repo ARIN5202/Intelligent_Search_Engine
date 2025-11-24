@@ -155,12 +155,7 @@ class IntelligentAgentApp:
                         time.sleep(0.02)  # 控制打字速度，越小越快
                     sys.stdout.write('\n')  # 每行结束后换行
 
-                if result['sources']:
-                    print(f"\n📚 References::")
-                    for i, source in enumerate(result['sources'], 1):
-                        print(f"{i}. {source['title']} (Relevance Score: {source['score']:.2f})")
-
-                # print(f"\n📊 Confidence Coefficient: {result['confidence']:.2f}")
+                print(f"\n📊 Confidence Coefficient: {result['confidence']:.2f}")
 
                 if 'error' in result:
                     print(f"⚠️  Error Message: {result['error']}")

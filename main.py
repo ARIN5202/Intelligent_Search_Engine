@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import mimetypes
 import sys
 from pathlib import Path
 from typing import Optional, Iterable, Union
@@ -15,13 +16,17 @@ import argparse
 import textwrap
 import sys
 import time
+from utils.handler import AttachmentHandler
+from config import get_settings
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # 添加项目根目录到路径
 project_root = Path(__file__).parent
 sys.path.append(str(project_root))
 
-import config
+
 from src.agent.orchestrator import AIAgent
+
+settings = get_settings()
 
 def parse_args():
     parser = argparse.ArgumentParser(description="智能代理框架")
@@ -37,6 +42,8 @@ class IntelligentAgentApp:
         self.agent = AIAgent()
         self.preproc = Preprocessor(ocr_lang="eng+chi_sim")
         self.is_running = False
+        api_key = settings.api_key
+        self.handler = AttachmentHandler()
 
     async def start(self):
         """启动应用程序"""
@@ -86,8 +93,14 @@ class IntelligentAgentApp:
                 "attachment_issues": [i.model_dump() for i in preprocess_result.issues],
             }
 
-            # 4) 交给 Agent（保持你原来的同步调用）
-            result = self.agent.run(user_input)
+            if user_input["attachments"]:
+                self.agent.run(user_input)
+                return await self.handler.process(
+                    query=user_input["raw_query"],
+                    attachments=user_input["attachments"]
+                )
+            else:
+                result = self.agent.run(user_input)
 
             # 5) 把预处理的 issues 回填到返回值，方便 CLI 打印/上层可见
             result.setdefault("preprocess", {})

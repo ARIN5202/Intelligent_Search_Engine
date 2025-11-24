@@ -119,7 +119,7 @@ class IntelligentAgentApp:
     async def interactive_mode(self):
         """交互模式"""
         print("\n🤖 Enter the interactive mode, typing 'quit' or 'exit' to exit.")
-        print("=" * 50)
+        print("=" * 80)
 
         while self.is_running:
             try:
@@ -135,7 +135,7 @@ class IntelligentAgentApp:
                     continue
 
                 # 获取附件路径（用户可以输入附件路径）
-                attachments_input = input("\nPlease Enter the attachment path (if any, separate multiple paths with Spaces and press Enter to skip) :").strip()
+                attachments_input = input("\n👤 Please enter the attachment path:").strip()
 
                 # 如果附件输入不为空，处理附件路径
                 attachments = [Path(att) for att in attachments_input.split()] if attachments_input else None
@@ -160,7 +160,7 @@ class IntelligentAgentApp:
                 if 'error' in result:
                     print(f"⚠️  Error Message: {result['error']}")
 
-                print("-" * 50)
+                print("=" * 80)
 
             except KeyboardInterrupt:
                 print("\n\n👋 Received an interrupt signal and is exiting...")

@@ -17,7 +17,7 @@ class PromptTemplates:
             # Query analysis templates
             'query_analysis': {
                 'intent_extraction': """
-Please analyze the following user query to extract keywords, time-related keywords, domain area.
+Analyze the following user query to extract keywords, time-related keywords, domain area.
 
 User Query: {query}
 Additional Context (if any): {context}
@@ -57,7 +57,9 @@ The specialized retriever may not directly answer the query but can provide addi
 {format_instructions}
 """,
                 "retrieval_metadata": """
-You are an intelligent assistant tasked with extracting specific metadata from a user query based on the selected tool.
+You are an intelligent assistant tasked with extracting specific metadata from a user query. 
+Your goal is to ensure the extracted metadata matches the required parameter format for the selected tool.
+Carefully analyze the user query and time-related keywords.
 
 ### Input Details:
 - Selected Tool: {tool_name}
@@ -65,10 +67,10 @@ You are an intelligent assistant tasked with extracting specific metadata from a
 - Time-Related Keywords: {time_related}
 
 ### Tool-Specific Metadata Requirements:
-1. Finance: Extract the ticker symbol(s) (e.g., AAPL), period (e.g. 5d, 1mo, 1y) or start and end date (e.g., 2023-01-01) if mentioned.
-2. Weather: Extract the location (e.g., city), mode (current (for now) or hourly/daily), target time (2025-11-23/tommorrow/today afternoon) if mentioned.
+1. Finance: Extract the ticker symbol(s) (e.g., "AAPL, TSLA"), period (e.g. "5d", "1mo", "1y") or start and end date in ISO 8601 format (e.g., 2023-01-01) if mentioned.
+2. Weather: Extract the location (e.g., "New York"), mode (One of ["current", "hourly", "daily"]), target time (e.g., "2025-11-23", "tomorrow", "today afternoon") if mentioned.
 3. HKO_WarnSum: No specific metadata extraction required.
-3. Transport: Extract the origin, destination, and transit mode (e.g., driving, walking, bicycling, transit (for public transport)).
+3. Transport: Extract the origin (e.g., "Central Station"), destination (e.g., "Airport"), and transit mode (One of ["driving", "walking", "bicycling", "transit"]).
 
 {format_instructions}
 """

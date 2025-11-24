@@ -48,14 +48,9 @@ class AIAgent:
         try:
             selected_tools = routing_results["selected_tools"]
             retrieval_metadata = routing_results.get("retrieval_metadata", {})  # 防御性一点
-
-            # Call web search retriever as the base
-            web_search_results = self.retrieval_manager.retrieve(
-                name="web_search",
-                query=query,
-                top_k=10,
-            )
-            retrieval_results = web_search_results 
+            retrieval_results = None
+            skip_web_search = False
+            k = 10  # Default top_k for web search
 
             # Call specialized retrievers if any selected
             if len(selected_tools) > 1:
@@ -65,18 +60,18 @@ class AIAgent:
                     tool_retrievals.append(self.retrieval_manager.retrieve(
                         name="transport",
                         query=query,
-                        origin=retrieval_metadata["origin"],
-                        destination=retrieval_metadata["destination"],
-                        mode=retrieval_metadata["transit_mode"],
+                        origin=retrieval_metadata.get("origin", None),
+                        destination=retrieval_metadata.get("destination", None),
+                        mode=retrieval_metadata.get("transit_mode", 'transit'),
                         top_k=10,
-                    ))
+                    ))      
                 elif specialized_tool == "finance":
                     for ticker in retrieval_metadata["ticker_symbols"]:
                         # if in shenzhen, add these
-                        import os
-                        proxy = 'http://127.0.0.1:7890'
-                        os.environ['HTTP_PROXY'] = proxy
-                        os.environ['HTTPS_PROXY'] = proxy
+                        # import os
+                        # proxy = 'http://127.0.0.1:7890'
+                        # os.environ['HTTP_PROXY'] = proxy
+                        # os.environ['HTTPS_PROXY'] = proxy
                         tool_retrievals.append(self.retrieval_manager.retrieve(
                             name="finance_yf",
                             query=query,
@@ -86,33 +81,51 @@ class AIAgent:
                             end_date=retrieval_metadata.get("end_date", None),
                             top_k=10,
                         ))
-                        print(f"  - Retrieved {len(tool_retrievals[-1].documents)} finance data for ticker: {ticker}")
+                    if tool_retrievals:
+                        k = 5    
                 elif specialized_tool == "weather":
                     tool_retrievals.append(self.retrieval_manager.retrieve(
                         name="weather",
                         query=query,
-                        location=retrieval_metadata["location"],
+                        location=retrieval_metadata.get("location", None),
                         mode=retrieval_metadata.get("mode", "daily"),   
                         at=retrieval_metadata.get("target_time", None),
                         top_k=10,
                     ))
+                    if tool_retrievals:
+                        k = 2
                 elif specialized_tool == "hko_warnsum":
                     tool_retrievals.append(self.retrieval_manager.retrieve(
                         name="hko_warnsum",
                         query=query,
                         top_k=10,
                     ))
+                    if tool_retrievals:
+                        skip_web_search = True
                 elif specialized_tool == "local_rag":
                     tool_retrievals.append(self.retrieval_manager.retrieve(
                         name="local_rag",
                         query=query,
                         top_k=10,
                     ))
-                
-                if tool_retrievals:
-                    for retrieval in tool_retrievals:
+                    if tool_retrievals:
+                        k = 5
+            
+            # Always call web search as fallback unless skipped
+            if not skip_web_search:
+                # Call web search retriever as the base
+                retrieval_results = self.retrieval_manager.retrieve(
+                    name="web_search",
+                    query=query,
+                    top_k=k,
+                )
+                for retrieval in tool_retrievals:
+                    retrieval_results.documents.extend(retrieval.documents)
+            else:
+                if retrieval_results is None:
+                    retrieval_results = tool_retrievals[0]
+                    for retrieval in tool_retrievals[1:]:
                         retrieval_results.documents.extend(retrieval.documents)
-
 
             print(
                 f"  - Retrieved {len(retrieval_results.documents)} documents "
@@ -162,6 +175,7 @@ class AIAgent:
             raw_query = user_input["raw_query"]
             query = user_input.get("processed_query", "")
             attachments = user_input.get("attachments", [])
+            # print(user_input)
 
             # Process attachments if provided
             if attachments:
@@ -185,13 +199,12 @@ class AIAgent:
             analysis_results = self.query_analyzer.analyze(query=raw_query, attachment_contents=attachment_contents)
             print(f"  - Rewritten Query: {analysis_results['rewritten_query']}")
             print(f"  - Keywords: {', '.join(analysis_results['keywords'])}")
-            print(f"  - Time Related: {', '.join(analysis_results['time_related'])}")
+            print(f"  - Time Related: {', '.join(analysis_results['time_related']) if analysis_results['time_related'] else 'None'}")
             print(f"  - Domain Area: {analysis_results['domain_area']}")
 
             print("\n⏱️ **Processing Time:**")
             print(f"  - Query Analysis Time: {time.time() - analysis_start:.2f}s")
             print("=" * 80)
-
 
             # Step 2: Route to appropriate retrievers
             print("\n🔀 **Step 2: Routing**")
@@ -206,32 +219,33 @@ class AIAgent:
             print(f"  - Routing Analysis Time: {time.time() - routing_start:.2f}s")
             print("=" * 80)
 
-
             # Step 3 & 4: Call the selected retriever to get documents and rerank them
             print("\n📚 **Step 3 & 4: Retrieval & Reranking**")
             retrieval_start = time.time()
             reranked_retrieval_results = self._retrieve_documents(routing_results, analysis_results)
             print(f"  - Reranked to final top {len(reranked_retrieval_results.contexts)} documents")
-            # for idx, context_doc in enumerate(reranked_retrieval_results.contexts, start=1):
-            #     print(f"\n{idx}. Content = {context_doc.content}")
 
             print("\n⏱️ **Processing Time:**")
             print(f"  - Retrieval & Reranking Time: {time.time() - retrieval_start:.2f}s")
             print("=" * 80)
 
             # Step 5: Synthesize final answer with rewritten query and reranked contexts
+            synthesis_start = time.time()
             final_answer = self.synthesizer.synthesize(
                 raw_query=raw_query,
                 query=analysis_results['rewritten_query'],
                 rerank_result=reranked_retrieval_results,
             )
 
-            # 把上下文转换成 CLI 用的 sources 列表
+            print("\n✏️ **Step 5: Answer Synthesis**")
+            print(f"  - Synthesis Time: {time.time() - synthesis_start:.2f}s")
+
+            # Convert contexts to CLI-friendly sources list
             sources = final_answer.to_sources()
 
             print(f"✏️ Generated answer with {len(sources)} sources")
-            print(f"⏱️ Total time: {time.time() - start_time:.2f} seconds")
-            print("===========================")
+            print(f"⏱️ **Total Time:** {time.time() - start_time:.2f} seconds")
+            print("=" * 80)
 
             return {
                 "answer": final_answer.answer,

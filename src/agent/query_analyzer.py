@@ -51,6 +51,8 @@ def parse_time_info(times: List[str]) -> List[Optional[str]]:
         try:
             if time.lower() in ["today", "tonight", "this evening", "this afternoon", "this morning", "current", "now", "latest"]:
                 parsed_date = datetime.datetime.now()
+            elif time.lower() == "tomorrow":
+                parsed_date = datetime.datetime.now() + datetime.timedelta(days=1)
             else:
                 parsed_date = dparser.parse(time, fuzzy=True)
             formatted_date = parsed_date.strftime("%Y-%m-%d")

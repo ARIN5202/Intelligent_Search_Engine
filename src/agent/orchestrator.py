@@ -162,7 +162,6 @@ class AIAgent:
             raw_query = user_input["raw_query"]
             query = user_input.get("processed_query", "")
             attachments = user_input.get("attachments", [])
-            print(user_input)
 
             # Process attachments if provided
             if attachments:

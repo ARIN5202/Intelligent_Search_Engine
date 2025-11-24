@@ -246,7 +246,7 @@ class Synthesizer:
             f"1. Analyze the documents in <context> to answer the User Query.\n"
             f"2. Prioritize the information in the context over your internal knowledge.\n"
             f"3. If the context is not perfectly matching (e.g., slight date difference), "
-            f"use the available info to provide the best possible answer, but mention the date/source strictly.\n"  # 关键修改：允许非完美匹配
+            f"use the available info to provide the best possible answer, but mention the date/source strictly.\n"
             f"4. Do NOT start with 'I cannot answer'. Go straight to the information you found.\n"
             f"{lang_instruction}"
         )

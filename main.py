@@ -43,7 +43,7 @@ class IntelligentAgentApp:
         self.preproc = Preprocessor(ocr_lang="eng+chi_sim")
         self.is_running = False
         api_key = settings.api_key
-        self.handler = AttachmentHandler(api_key=api_key)
+        self.handler = AttachmentHandler()
 
     async def start(self):
         """启动应用程序"""
@@ -94,6 +94,7 @@ class IntelligentAgentApp:
             }
 
             if user_input["attachments"]:
+                self.agent.run(user_input)
                 return await self.handler.process(
                     query=user_input["raw_query"],
                     attachments=user_input["attachments"]

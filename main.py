@@ -51,9 +51,9 @@ class IntelligentAgentApp:
 
     async def stop(self):
         """停止应用程序"""
-        print("🛑 正在停止智能代理框架...")
+        print("🛑 The intelligent agent framework is being halted...")
         self.is_running = False
-        print("✅ 智能代理框架已停止")
+        print("✅The intelligent agent framework has been discontinued")
 
     async def process_query(
             self,
@@ -64,7 +64,7 @@ class IntelligentAgentApp:
     ) -> dict:
         if not self.is_running:
             return {
-                'answer': '系统尚未启动，请稍候再试。',
+                'answer': 'The system has not been started yet. Please try again later.',
                 'sources': [],
                 'confidence': 0.0,
                 'error': 'System not started'
@@ -108,9 +108,9 @@ class IntelligentAgentApp:
 
             return result
         except Exception as e:
-            print(f"❌ 处理查询时发生错误: {e}")
+            print(f"❌ An error occurred when processing the query: {e}")
             return {
-                'answer': f'抱歉，处理您的问题时遇到了错误: {str(e)}',
+                'answer': f'Sorry, I encountered an error when handling your issue: {str(e)}',
                 'sources': [],
                 'confidence': 0.0,
                 'error': str(e)
@@ -118,35 +118,35 @@ class IntelligentAgentApp:
 
     async def interactive_mode(self):
         """交互模式"""
-        print("\n🤖 进入交互模式，输入 'quit' 或 'exit' 退出")
+        print("\n🤖 Enter the interactive mode, typing 'quit' or 'exit' to exit.")
         print("=" * 50)
 
         while self.is_running:
             try:
-                query = input("\n👤 请输入您的问题: ").strip()
+                query = input("\n👤 Please enter your question: ").strip()
 
                 # 检查退出命令
                 if query.lower() in ['quit', 'exit', '退出', 'q']:
-                    print("👋 再见！")
+                    print("👋 Bye！")
                     break
 
                 if not query:
-                    print("❓ 请输入有效的问题")
+                    print("❓ Please enter valid questions")
                     continue
 
                 # 获取附件路径（用户可以输入附件路径）
-                attachments_input = input("\n请输入附件路径（如果有的话，多个路径用空格分隔，按 Enter 跳过）：").strip()
+                attachments_input = input("\nPlease Enter the attachment path (if any, separate multiple paths with Spaces and press Enter to skip) :").strip()
 
                 # 如果附件输入不为空，处理附件路径
                 attachments = [Path(att) for att in attachments_input.split()] if attachments_input else None
 
                 # 处理查询
-                print(f"\n🔄 正在处理: {query}")
+                print(f"\n🔄 Processing: {query}")
                 result = await self.process_query(query, attachments=attachments)
 
                 # 显示结果
-                print(f"\n🤖 回答:")
-                wrapped_lines = textwrap.wrap(result['answer'], width=70)
+                print(f"\n🤖 Response:")
+                wrapped_lines = textwrap.wrap(result['answer'], width=60)
 
                 for line in wrapped_lines:
                     for char in line:
@@ -156,22 +156,22 @@ class IntelligentAgentApp:
                     sys.stdout.write('\n')  # 每行结束后换行
 
                 if result['sources']:
-                    print(f"\n📚 参考来源:")
+                    print(f"\n📚 References::")
                     for i, source in enumerate(result['sources'], 1):
                         print(f"{i}. {source['title']} (评分: {source['score']:.2f})")
 
-                print(f"\n📊 置信度: {result['confidence']:.2f}")
+                print(f"\n📊 Confidence Coefficient: {result['confidence']:.2f}")
 
                 if 'error' in result:
-                    print(f"⚠️  错误信息: {result['error']}")
+                    print(f"⚠️  Error Message: {result['error']}")
 
                 print("-" * 50)
 
             except KeyboardInterrupt:
-                print("\n\n👋 收到中断信号，正在退出...")
+                print("\n\n👋 Received an interrupt signal and is exiting...")
                 break
             except Exception as e:
-                print(f"\n❌ 发生错误: {e}")
+                print(f"\n❌ Something went wrong: {e}")
 
 
 async def main():
@@ -185,9 +185,9 @@ async def main():
         await app.interactive_mode()
 
     except KeyboardInterrupt:
-        print("\n收到中断信号")
+        print("\nReceived an interrupt signal")
     except Exception as e:
-        print(f"应用程序错误: {e}")
+        print(f"Application error: {e}")
     finally:
         await app.stop()
 

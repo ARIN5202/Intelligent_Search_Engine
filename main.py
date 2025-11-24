@@ -155,8 +155,6 @@ class IntelligentAgentApp:
                         time.sleep(0.02)  # 控制打字速度，越小越快
                     sys.stdout.write('\n')  # 每行结束后换行
 
-                print(f"\n📊 Confidence Coefficient: {result['confidence']:.2f}")
-
                 if 'error' in result:
                     print(f"⚠️  Error Message: {result['error']}")
 

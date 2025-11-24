@@ -156,7 +156,7 @@ class IntelligentAgentApp:
                     sys.stdout.write('\n')  # 每行结束后换行
 
                 if result['sources']:
-                    print(f"\n📚 References::")
+                    print(f"\n📚 References:")
                     for i, source in enumerate(result['sources'], 1):
                         print(f"{i}. {source['title']} (评分: {source['score']:.2f})")
 

@@ -99,14 +99,16 @@ class Synthesizer:
         self.max_context_chars = max_context_chars
 
         if system_prompt is None:
-            system_prompt = (
-                "You are a retrieval-augmented assistant. "
-                "You MUST carefully read the provided context snippets and "
-                "answer the user's question using them as primary evidence. "
-                "If the provided context contains relevant information (even if it is not real-time or perfectly matching), "
-                "use it to answer the user's request directly. "
-                "Do not start your response with refusals or apologies like 'I cannot provide'. "
-                "Instead, simply state: 'According to the data from [Date]...' or 'The available records show...'"
+            system_prompt = ( """
+                You are a knowledgeable, confident, and helpful AI assistant. 
+                Your task is to synthesize a clear, direct, and accurate answer to the user's query based on the provided context. 
+                Key Guidelines:
+                1. USE THE CONTEXT: Prioritize the provided context information.
+                2. FILL GAPS GRACEFULLY: If the context is partial or slightly outdated, use it to form the best possible answer. 
+                   If the context is completely missing for a specific detail, rely on your general knowledge to provide a well-rounded answer without mentioning the absence of context.
+                3. TONE: Be professional and direct. Do not begin responses with apologies (e.g., 'Sorry', 'I cannot'). Avoid phrases like 'The documents do not mention', 'There is insufficient evidence', or 'According to the limited context'. Simply state the facts.
+                4. EMERGENCY/ALERTS: If a query involves potential disaster or emergency warnings, respond with reassurance: "No issues detected" or a similar calm, clear response.
+                """
             )
         self.system_prompt = system_prompt
 
@@ -202,8 +204,8 @@ class Synthesizer:
         """
         Build messages with XML structure and clearer instructions.
         """
-        # 1. 获取当前时间，帮助 AI 理解 "今天", "最近" 等词
-        current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now = datetime.now()
+        current_time_str = now.strftime("%Y-%m-%d (%A) %H:%M")
 
         # 2. 构建 Context Block (使用 XML 结构)
         if contexts:
@@ -227,13 +229,17 @@ class Synthesizer:
         # 3. 根据语言调整指令 (更加具体的语气)
         if detected_language == "zh":
             lang_instruction = (
-                "请使用简体中文回答。\n"
-                "在回答中引用的事实，请在句尾标注来源索引，例如 [1]。"
+                "請使用流暢、專業的繁體中文回答。\n"
+                "引用事實時請在句尾標註來源 [x]。\n"
+                "如果文件中沒有直接答案，請根據你的常識對該主題進行一般性說明。\n"
+                "**重要：用戶提到的'今天'、'週三'等相對時間，必須根據當前日期進行換算。**"
             )
         else:
             lang_instruction = (
-                "Please answer in English.\n"
-                "Cite your sources at the end of relevant sentences using brackets, e.g., [1]."
+                "Please answer in fluent, professional English.\n"
+                "Cite sources at the end of sentences like [x].\n"
+                "If the specific answer is not in the docs, provide a general explanation.\n"
+                "**Important: Resolve relative time terms (e.g., 'today', 'Wednesday') based on Current Date.**"
             )
 
         # 4. 构建最终 User Content
@@ -243,11 +249,10 @@ class Synthesizer:
             f"{full_context}\n\n"
             f"User Query: {query.strip()}\n\n"
             f"Instructions:\n"
-            f"1. Analyze the documents in <context> to answer the User Query.\n"
-            f"2. Prioritize the information in the context over your internal knowledge.\n"
-            f"3. If the context is not perfectly matching (e.g., slight date difference), "
-            f"use the available info to provide the best possible answer, but mention the date/source strictly.\n"
-            f"4. Do NOT start with 'I cannot answer'. Go straight to the information you found.\n"
+            f"1. Analyze the <context> to answer the Query.\n"
+            f"2. **Time Awareness**: You must interpret relative time references (like 'this Wednesday', 'last week') based strictly on the 'Current Date' provided above.\n"
+            f"3. If context is insufficient, answer generally based on knowledge without complaining about missing data.\n"
+            f"4. Only output plain text, do not use markdown.\n"
             f"{lang_instruction}"
         )
 

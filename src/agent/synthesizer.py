@@ -1,137 +1,260 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-答案合成器 - 任务4
-将检索到的信息合成为最终答案
+Synthesizer - Step 5-6
+负责：
+- 接收 RerankResult（已按相关性排好）
+- 做上下文过滤（Top-k / 长度控制）
+- 调用 DeepSeek API 做最终回答
+- 记录延迟和 Token 使用情况
 """
 
-import asyncio
-from typing import List, Dict, Any, Optional
-from ..prompts.templates import PromptTemplates
+from __future__ import annotations
+
+import re
+from datetime import datetime
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Sequence
+
+from config import get_settings
+from openai import AzureOpenAI
+
+from .reranker import ContextDoc, RerankResult
+
+settings = get_settings()  # 获取配置实例
+
+@dataclass(slots=True)
+class SynthesizedResponse:
+    query: str
+    answer: str
+    contexts: List[ContextDoc]
+    latency: float
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_sources(self) -> List[Dict[str, Any]]:
+        """把 contexts 转成前端/CLI 用的 sources 列表."""
+        sources = []
+        for ctx in self.contexts:
+            score = ctx.rerank_score
+            if score is None:
+                score = ctx.retrieval_score
+            sources.append(
+                {
+                    "title": ctx.source,          # CLI 用的是 source['title']
+                    "score": score if score is not None else 0.0,
+                    "content": ctx.content,       # 你想展示的话也可以后面用
+                }
+            )
+        return sources
+
+def _filter_contexts(
+        contexts: Sequence[ContextDoc],
+    max_k: int,
+    max_chars: int,
+) -> List[ContextDoc]:
+    """
+    根据排序结果做二次过滤：
+    - 只取前 max_k 条
+    - 同时控制拼接后的总字符数不超过 max_chars
+    """
+    if not contexts:
+        return []
+
+    selected: List[ContextDoc] = []
+    used_chars = 0
+
+    for doc in contexts[:max_k]:
+        c = doc.content
+        length = len(c)
+        if used_chars + length > max_chars:
+            break
+        selected.append(doc)
+        used_chars += length
+    return selected
 
 
 class Synthesizer:
-    """答案合成器，负责将检索信息合成为最终回答"""
-
-    def __init__(self):
-        """初始化合成器"""
-        self.prompt_templates = PromptTemplates()
-        # TODO: 在实际项目中这里应该初始化LLM客户端
-        # 例如: OpenAI GPT, Claude, 或本地LLM
-
-    async def generate_answer(self, query: str, retrieved_docs: List[Dict[str, Any]],
-                              context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def __init__(
+        self,
+        deployment_name: str = "gpt-4o",
+        api_key: str | None = None,
+        base_url: str | None = None,
+        system_prompt: str | None = None,
+        max_contexts: int = 8,
+        max_context_chars: int = 12000,
+    ) -> None:
         """
-        生成最终答案
-
-        Args:
-            query: 用户查询
-            retrieved_docs: 检索到的相关文档
-            context: 可选的上下文信息
-
-        Returns:
-            包含答案、来源和置信度的字典
+        Initialize the Synthesizer with required parameters.
         """
-        if not retrieved_docs:
-            return {
-                'answer': '抱歉，我没有找到相关信息来回答您的问题。',
-                'sources': [],
-                'confidence': 0.0
+        endpoint = base_url or settings.azure_url
+        key = api_key or settings.azure_api_key
+        self.client = AzureOpenAI(
+            azure_endpoint=endpoint,
+            api_key=key,
+            api_version="2025-02-01-preview",
+        )
+        self.model = deployment_name
+        self.max_contexts = max_contexts
+        self.max_context_chars = max_context_chars
+
+        if system_prompt is None:
+            system_prompt = ( """
+                You are a knowledgeable, confident, and helpful AI assistant. 
+                Your task is to synthesize a clear, direct, and accurate answer to the user's query based on the provided context. 
+                Key Guidelines:
+                1. USE THE CONTEXT: Prioritize the provided context information.
+                2. FILL GAPS GRACEFULLY: If the context is partial or slightly outdated, use it to form the best possible answer. 
+                   If the context is completely missing for a specific detail, rely on your general knowledge to provide a well-rounded answer without mentioning the absence of context.
+                3. TONE: Be professional and direct. Do not begin responses with apologies (e.g., 'Sorry', 'I cannot'). Avoid phrases like 'The documents do not mention', 'There is insufficient evidence', or 'According to the limited context'. Simply state the facts.
+                4. EMERGENCY/ALERTS: If a query involves potential disaster or emergency warnings, respond with reassurance: "No issues detected" or a similar calm, clear response.
+                """
+            )
+        self.system_prompt = system_prompt
+
+    def synthesize(
+        self,
+        raw_query: str,
+        query: str,
+        rerank_result: RerankResult,
+        top_k: Optional[int] = None,
+    ) -> SynthesizedResponse:
+        """
+        Synthesize the final response based on query and contexts.
+        Now includes language detection to determine the response language.
+        """
+        if top_k is None:
+            top_k = self.max_contexts
+
+        # 1) Filter contexts (Top-k + Length restriction)
+        filtered_contexts = _filter_contexts(
+            rerank_result.contexts,
+            max_k=top_k,
+            max_chars=self.max_context_chars,
+        )
+
+        # 2) Detect the language of the raw query
+        detected_language = self._detect_language(raw_query)
+
+        # 3) Build messages with instructions for the language
+        messages = self._build_messages(query, filtered_contexts, detected_language)
+
+        start = time.perf_counter()
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            stream=False,
+        )
+        elapsed = time.perf_counter() - start
+
+        # 4) Process the response
+        choice = resp.choices[0]
+        answer_text = choice.message.content or ""
+
+        # Collect usage information
+        usage_info = {}
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            usage_info = {
+                "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                "completion_tokens": getattr(usage, "completion_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
             }
 
-        # 构建prompt
-        prompt = self._build_synthesis_prompt(query, retrieved_docs, context)
-
-        # 生成答案（这里是模拟，实际应该调用LLM）
-        answer = await self._call_llm(prompt)
-
-        # 提取来源信息
-        sources = self._extract_sources(retrieved_docs)
-
-        # 计算置信度
-        confidence = self._calculate_confidence(retrieved_docs, answer)
-
-        return {
-            'answer': answer,
-            'sources': sources,
-            'confidence': confidence,
-            'reasoning': '基于检索到的文档合成答案'
+        metadata: Dict[str, Any] = {
+            "llm_model": resp.model,
+            "llm_finish_reason": getattr(choice, "finish_reason", None),
+            "llm_usage": usage_info,
+            "llm_latency": elapsed,
         }
 
-    def _build_synthesis_prompt(self, query: str, documents: List[Dict[str, Any]],
-                                context: Optional[Dict[str, Any]] = None) -> str:
-        """构建合成prompt"""
-        # 整理文档内容
-        doc_contents = []
-        for i, doc in enumerate(documents, 1):
-            content = f"文档{i}: {doc.get('content', '')}"
-            if doc.get('title'):
-                content = f"文档{i} ({doc['title']}): {doc.get('content', '')}"
-            doc_contents.append(content)
+        return SynthesizedResponse(
+            query=query,
+            answer=answer_text.strip(),
+            contexts=filtered_contexts,
+            latency=elapsed,
+            metadata=metadata,
+        )
 
-        context_str = ""
-        if context:
-            context_str = f"上下文信息: {context}\n\n"
+    # ---------- Internal helpers ----------
 
-        prompt = f"""请基于以下检索到的文档回答用户问题。
+    def _detect_language(self, raw_query: str) -> str:
+        """
+        Detect the language of the raw_query using Regex.
+        Returns "zh" if CJK characters are found, otherwise "en".
+        """
+        if not raw_query:
+            return "en"
 
-{context_str}用户问题: {query}
+        # Unicode range for CJK Unified Ideographs (covers most common Chinese characters)
+        # \u4e00-\u9fff is the standard range for CJK characters
+        pattern = re.compile(r'[\u4e00-\u9fff]')
 
-相关文档:
-{chr(10).join(doc_contents)}
-
-请要求:
-1. 基于提供的文档内容回答问题
-2. 答案要准确、完整、易懂
-3. 如果文档中没有足够信息，请说明
-4. 保持回答的客观性
-
-回答:"""
-
-        return prompt
-
-    async def _call_llm(self, prompt: str) -> str:
-        """调用LLM生成答案（模拟实现）"""
-        # TODO: 在实际项目中这里应该调用真实的LLM API
-        # 这里提供一个简单的模拟实现
-
-        # 模拟LLM响应时间
-        await asyncio.sleep(0.1)
-
-        # 简单的基于关键词的回答生成（仅用于演示）
-        if "天气" in prompt:
-            return "根据检索到的信息，今天的天气情况是..."
-        elif "公司" in prompt or "规定" in prompt:
-            return "根据公司相关文档，相关规定如下..."
+        if pattern.search(raw_query):
+            return "zh"
         else:
-            return "基于检索到的文档，我为您整理了以下信息..."
+            return "en"
 
-    def _extract_sources(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """提取来源信息"""
-        sources = []
-        for doc in documents:
-            source = {
-                'title': doc.get('title', '未知标题'),
-                'source': doc.get('source', ''),
-                'score': doc.get('rerank_score', doc.get('score', 0)),
-                'snippet': doc.get('content', '')[:200] + '...' if len(doc.get('content', '')) > 200 else doc.get(
-                    'content', '')
-            }
-            sources.append(source)
-        return sources
+    def _build_messages(
+            self,
+            query: str,
+            contexts: Sequence[ContextDoc],
+            detected_language: str,
+    ) -> List[Dict[str, str]]:
+        """
+        Build messages with XML structure and clearer instructions.
+        """
+        now = datetime.now()
+        current_time_str = now.strftime("%Y-%m-%d (%A) %H:%M")
 
-    def _calculate_confidence(self, documents: List[Dict[str, Any]], answer: str) -> float:
-        """计算答案置信度"""
-        if not documents:
-            return 0.0
+        # 2. 构建 Context Block (使用 XML 结构)
+        if contexts:
+            doc_lines = []
+            for i, c in enumerate(contexts, start=1):
+                # 添加元数据，帮助 AI 判断信息的新旧和质量
+                meta_info = f'source="{c.source}"'
+                if c.rerank_score is not None:
+                    meta_info += f' score="{c.rerank_score:.4f}"'
 
-        # 基于文档分数和数量计算置信度
-        avg_score = sum(doc.get('rerank_score', doc.get('score', 0)) for doc in documents) / len(documents)
-        doc_count_factor = min(1.0, len(documents) / 5)  # 5个文档为满分
+                # 使用 xml 标签包裹每个文档
+                doc_lines.append(
+                    f'<document index="{i}" {meta_info}>\n{c.content.strip()}\n</document>'
+                )
+            ctx_block = "\n".join(doc_lines)
+            # 外层再包一个 context 标签
+            full_context = f"<context>\n{ctx_block}\n</context>"
+        else:
+            full_context = "<context>\nNo external documents retrieved.\n</context>"
 
-        confidence = (avg_score * 0.7 + doc_count_factor * 0.3)
-        return min(1.0, confidence)
+        # 3. 根据语言调整指令 (更加具体的语气)
+        if detected_language == "zh":
+            lang_instruction = (
+                "請使用流暢、專業的繁體中文回答。\n"
+                "如果文件中沒有直接答案，請根據你的常識對該主題進行一般性說明。\n"
+                "**重要：用戶提到的'今天'、'週三'等相對時間，必須根據當前日期進行換算。**"
+            )
+        else:
+            lang_instruction = (
+                "Please answer in fluent, professional English.\n"
+                "If the specific answer is not in the docs, provide a general explanation.\n"
+                "**Important: Resolve relative time terms (e.g., 'today', 'Wednesday') based on Current Date.**"
+            )
 
-    async def health_check(self) -> bool:
-        """健康检查"""
-        return True
+        # 4. 构建最终 User Content
+        # 注意：将 Query 放在 Context 之后通常效果更好，符合阅读逻辑
+        user_content = (
+            f"Current Date: {current_time_str}\n\n"
+            f"{full_context}\n\n"
+            f"User Query: {query.strip()}\n\n"
+            f"Instructions:\n"
+            f"1. Analyze the <context> to answer the Query.\n"
+            f"2. **Time Awareness**: You must interpret relative time references (like 'this Wednesday', 'last week') based strictly on the 'Current Date' provided above.\n"
+            f"3. If context is insufficient, answer generally based on knowledge without complaining about missing data.\n"
+            f"4. Only output plain text, do not use markdown.\n"
+            f"{lang_instruction}"
+        )
+
+        return [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": user_content},
+        ]

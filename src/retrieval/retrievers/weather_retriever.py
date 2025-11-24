@@ -1,190 +1,280 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-天气检索器
-获取天气信息
-"""
+"""Weather retriever with Visual Crossing (primary) and OpenWeather current fallback."""
 
-import asyncio
-import aiohttp
-from typing import List, Dict, Any
-from .base_retriever import BaseRetriever
+from __future__ import annotations
+
+import datetime as dt
+from typing import Any, Dict, List, Mapping, Optional
+import requests
+from zoneinfo import ZoneInfo
+
+from config import Settings
+from .base_retriever import BaseRetriever, RetrievedDocument
 
 
 class WeatherRetriever(BaseRetriever):
-    """天气信息检索器"""
+    """Fetch weather information (current/hourly/daily) for a given location."""
 
-    def __init__(self):
-        super().__init__("Weather")
-        self.description = "天气信息检索器，获取天气预报和实时天气数据"
-        self.api_key = None
-        self.base_url = "https://api.openweathermap.org/data/2.5"
+    domain = [
+        "weather", "forecast", "temperature", "humidity", "rain", "snow", "climate", "wind", "storm"
+    ]
 
-    async def _do_initialize(self):
-        """初始化天气API"""
-        # TODO: 从配置中获取API密钥
-        # self.api_key = Config().get('weather_api_key')
-        print("天气检索器初始化完成")
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        session: Optional[requests.Session] = None,
+    ) -> None:
+        super().__init__(name="weather", settings=settings)
+        self._session = session or requests.Session()
 
-    async def retrieve(self, query: str, top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
-        """
-        获取天气信息
+    def _retrieve(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        location: Optional[str] = None,
+        units: str = "metric",
+        lang: Optional[str] = None,
+        mode: str = "current",  # current | hourly | daily
+        at: Optional[str] = None,
+        lat: Optional[float] = None,
+        lon: Optional[float] = None,
+        **_: Any,
+    ):
+        target = (location or query).strip()
+        if not target and (lat is None or lon is None):
+            raise ValueError("A location or lat/lon must be supplied for weather queries.")
 
-        Args:
-            query: 查询内容（应包含地点信息）
-            top_k: 返回结果数量
+        mode_lower = mode.lower()
 
-        Returns:
-            天气信息结果列表
-        """
-        if not self.is_initialized:
-            await self.initialize()
+        # Prefer Visual Crossing if configured
+        if self.settings.visualcrossing_api_key:
+            docs, meta = self._retrieve_visualcrossing(
+                target=target,
+                units=units,
+                mode=mode_lower,
+                at=at,
+            )
+            return docs, meta
 
-        try:
-            # 从查询中提取城市名
-            city = self._extract_city_from_query(query)
+        # Fallback to OpenWeather current only
+        docs, meta = self._retrieve_openweather_current(
+            target=target,
+            units=units,
+            lang=lang,
+        )
+        return docs, meta
 
-            # 获取天气信息
-            weather_data = await self._get_weather_data(city)
-
-            # 格式化结果
-            results = []
-            if weather_data:
-                # 当前天气
-                current_weather = self._format_current_weather(weather_data, city)
-                results.append(current_weather)
-
-                # 如果需要更多结果，可以添加预报信息
-                if top_k > 1:
-                    forecast_data = await self._get_forecast_data(city)
-                    if forecast_data:
-                        forecast_results = self._format_forecast_data(forecast_data, city)
-                        results.extend(forecast_results[:top_k - 1])
-
-            return results
-
-        except Exception as e:
-            print(f"天气信息获取失败: {e}")
-            return []
-
-    def _extract_city_from_query(self, query: str) -> str:
-        """从查询中提取城市名"""
-        # 简单的城市名提取逻辑
-        query_lower = query.lower()
-
-        # 常见城市列表（实际项目中应该更全面）
-        cities = ['北京', '上海', '广州', '深圳', '杭州', '南京', '成都', '重庆', '武汉', '西安']
-
-        for city in cities:
-            if city in query:
-                return city
-
-        # 默认返回北京
-        return '北京'
-
-    async def _get_weather_data(self, city: str) -> Dict[str, Any]:
-        """获取当前天气数据（模拟实现）"""
-        # 模拟延迟
-        await asyncio.sleep(0.1)
-
-        # 模拟天气数据
-        mock_weather = {
-            'city': city,
-            'temperature': 22,
-            'feels_like': 25,
-            'humidity': 65,
-            'description': '多云',
-            'wind_speed': 3.2,
-            'pressure': 1013,
-            'visibility': 10
+    # ---------- Visual Crossing ----------
+    def _retrieve_visualcrossing(
+        self,
+        *,
+        target: str,
+        units: str,
+        mode: str,
+        at: Optional[str],
+    ) -> tuple[List[RetrievedDocument], Dict[str, Any]]:
+        url = self.settings.visualcrossing_api_url
+        api_key = self.settings.visualcrossing_api_key
+        params = {
+            "unitGroup": "metric" if units == "metric" else "us",
+            "include": "hours",
+            "key": api_key,
         }
+        response = self._session.get(
+            f"{url}/{target}",
+            params=params,
+            timeout=self.settings.request_timeout,
+        )
+        response.raise_for_status()
+        data = response.json()
 
-        return mock_weather
+        tz_name = data.get("timezone") or data.get("tz") or data.get("timeZone")
+        tzinfo = self._get_tzinfo(tz_name)
 
-    async def _get_forecast_data(self, city: str) -> List[Dict[str, Any]]:
-        """获取天气预报数据（模拟实现）"""
-        await asyncio.sleep(0.1)
+        target_dt = self._parse_target_time(at, tzinfo)
+        documents: List[RetrievedDocument] = []
 
-        # 模拟5天预报
-        forecast = []
-        for i in range(5):
-            day_forecast = {
-                'date': f'2024-10-{10 + i:02d}',
-                'temperature_max': 25 + i,
-                'temperature_min': 15 + i,
-                'description': ['晴天', '多云', '小雨', '阴天', '晴天'][i],
-                'humidity': 60 + i * 5,
-                'wind_speed': 2.5 + i * 0.5
-            }
-            forecast.append(day_forecast)
+        days = data.get("days") or []
+        if mode == "daily":
+            entry = self._select_day(days, target_dt)
+            if entry:
+                documents.append(self._build_vc_doc(entry, mode="daily", tzinfo=tzinfo, tz_name=tz_name))
+        else:
+            # hourly or current -> flatten hours
+            hours = self._flatten_hours(days)
+            entry = self._select_hour(hours, target_dt)
+            if entry:
+                documents.append(self._build_vc_doc(entry, mode="hourly", tzinfo=tzinfo, tz_name=tz_name))
 
-        return forecast
+        metadata = {
+            "provider": "visualcrossing",
+            "requested_location": target,
+            "mode": mode,
+            "at": at,
+            "units": units,
+            "timezone": tz_name or "UTC",
+        }
+        return documents, metadata
 
-    def _format_current_weather(self, weather_data: Dict[str, Any], city: str) -> Dict[str, Any]:
-        """格式化当前天气信息"""
-        content = f"""
-{city}当前天气：
-- 天气状况：{weather_data['description']}
-- 当前气温：{weather_data['temperature']}°C
-- 体感温度：{weather_data['feels_like']}°C
-- 湿度：{weather_data['humidity']}%
-- 风速：{weather_data['wind_speed']} m/s
-- 气压：{weather_data['pressure']} hPa
-- 能见度：{weather_data['visibility']} km
-        """
+    @staticmethod
+    def _flatten_hours(days: List[Mapping[str, Any]]) -> List[Mapping[str, Any]]:
+        hours: List[Mapping[str, Any]] = []
+        for d in days:
+            hs = d.get("hours") or []
+            hours.extend(hs)
+        return hours
 
-        return self._format_result(
-            content=content.strip(),
-            title=f"{city}实时天气",
-            source="天气API",
-            score=0.9,
-            metadata={
-                'city': city,
-                'data_type': 'current_weather',
-                'temperature': weather_data['temperature'],
-                'description': weather_data['description'],
-                'retrieval_method': 'weather_api'
-            }
+    @staticmethod
+    def _select_day(days: List[Mapping[str, Any]], target_dt: Optional[dt.datetime]) -> Optional[Mapping[str, Any]]:
+        if not days:
+            return None
+        if target_dt is None:
+            return days[0]
+        tgt = target_dt.date()
+        # pick exact date if present, else closest by date diff
+        best = min(days, key=lambda d: abs(dt.date.fromisoformat(d["datetime"]) - tgt))
+        return best
+
+    @staticmethod
+    def _select_hour(hours: List[Mapping[str, Any]], target_dt: Optional[dt.datetime]) -> Optional[Mapping[str, Any]]:
+        if not hours:
+            return None
+        if target_dt is None:
+            return hours[0]
+        target_ts = target_dt.timestamp()
+        best = min(hours, key=lambda h: abs((h.get("datetimeEpoch", target_ts) - target_ts)))
+        return best
+
+    @staticmethod
+    def _build_vc_doc(entry: Mapping[str, Any], mode: str, tzinfo: Optional[dt.tzinfo], tz_name: Optional[str]) -> RetrievedDocument:
+        ts = entry.get("datetimeEpoch")
+        if ts:
+            base_tz = tzinfo or dt.timezone.utc
+            dt_local = dt.datetime.fromtimestamp(ts, base_tz)
+            dt_str = dt_local.strftime("%Y-%m-%d %H:%M %Z")
+        else:
+            dt_str = "N/A"
+        conditions = entry.get("conditions")
+        temp = entry.get("temp")
+        tempmax = entry.get("tempmax")
+        tempmin = entry.get("tempmin")
+        feelslike = entry.get("feelslike")
+        humidity = entry.get("humidity")
+        wind = entry.get("windspeed")
+        precip = entry.get("precip")
+
+        lines = [f"Time: {dt_str}", f"Mode: {mode}"]
+        if conditions:
+            lines.append(f"Conditions: {conditions}")
+        if temp is not None:
+            lines.append(f"Temperature: {temp} deg")
+        if tempmax is not None:
+            lines.append(f"Temp max: {tempmax} deg")
+        if tempmin is not None:
+            lines.append(f"Temp min: {tempmin} deg")
+        if feelslike is not None:
+            lines.append(f"Feels like: {feelslike} deg")
+        if humidity is not None:
+            lines.append(f"Humidity: {humidity}%")
+        if wind is not None:
+            lines.append(f"Wind: {wind} m/s")
+        if precip is not None:
+            lines.append(f"Precip: {precip}")
+
+        return RetrievedDocument(
+            content="\n".join(lines),
+            source="weather",
+            score=1.0,
+            metadata={"raw": entry, "dt": ts, "mode": mode, "timezone": tz_name or "UTC"},
         )
 
-    def _format_forecast_data(self, forecast_data: List[Dict[str, Any]], city: str) -> List[Dict[str, Any]]:
-        """格式化预报数据"""
-        results = []
+    # ---------- OpenWeather fallback (current only) ----------
+    def _retrieve_openweather_current(
+        self,
+        *,
+        target: str,
+        units: str,
+        lang: Optional[str],
+    ) -> tuple[List[RetrievedDocument], Dict[str, Any]]:
+        api_key = self.settings.weather_api_key
+        if not api_key:
+            raise RuntimeError("Weather API key missing. Set WEATHER_API_KEY in the environment.")
 
-        for i, day_data in enumerate(forecast_data):
-            content = f"""
-{city} {day_data['date']} 天气预报：
-- 天气状况：{day_data['description']}
-- 最高气温：{day_data['temperature_max']}°C
-- 最低气温：{day_data['temperature_min']}°C
-- 湿度：{day_data['humidity']}%
-- 风速：{day_data['wind_speed']} m/s
-            """
+        params: Dict[str, Any] = {"q": target, "appid": api_key, "units": units}
+        if lang:
+            params["lang"] = lang
+        response = self._session.get(
+            self.settings.weather_api_url,
+            params=params,
+            timeout=self.settings.request_timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        doc = self._build_ow_current_doc(payload)
+        meta = {"requested_location": target, "units": units, "mode": "current"}
+        return [doc], meta
 
-            result = self._format_result(
-                content=content.strip(),
-                title=f"{city} {day_data['date']} 天气预报",
-                source="天气API",
-                score=0.8 - i * 0.1,  # 越远的预报相关性越低
-                metadata={
-                    'city': city,
-                    'date': day_data['date'],
-                    'data_type': 'forecast',
-                    'max_temp': day_data['temperature_max'],
-                    'min_temp': day_data['temperature_min'],
-                    'retrieval_method': 'weather_api'
-                }
-            )
-            results.append(result)
+    @staticmethod
+    def _build_ow_current_doc(payload: Mapping[str, Any]) -> RetrievedDocument:
+        name = payload.get("name", "Unknown location")
+        sys = payload.get("sys", {})
+        country = sys.get("country")
+        weather_entries = payload.get("weather", [])
+        descriptions = ", ".join(
+            entry.get("description", "").capitalize() for entry in weather_entries if entry
+        )
+        main = payload.get("main", {})
+        wind = payload.get("wind", {})
 
-        return results
+        lines = [f"Weather for {name}{f', {country}' if country else ''}"]
+        if descriptions:
+            lines.append(f"Conditions: {descriptions}")
+        if "temp" in main:
+            lines.append(f"Temperature: {main['temp']} deg")
+        if "feels_like" in main:
+            lines.append(f"Feels like: {main['feels_like']} deg")
+        if "humidity" in main:
+            lines.append(f"Humidity: {main['humidity']}%")
+        if "speed" in wind:
+            lines.append(f"Wind: {wind['speed']} m/s")
 
-    async def health_check(self) -> bool:
-        """健康检查"""
+        return RetrievedDocument(
+            content="\n".join(lines),
+            source="weather",
+            score=1.0,
+            metadata={"raw": payload},
+        )
+
+    # ---------- Utilities ----------
+    @staticmethod
+    def _parse_target_time(at: Optional[str], tzinfo: Optional[dt.tzinfo]) -> Optional[dt.datetime]:
+        if not at:
+            return None
+        lower = at.lower().strip()
+        now = dt.datetime.now(tzinfo or dt.timezone.utc)
+        if lower in ("now", "current"):
+            return now
+        if lower in ("today",):
+            return now.replace(hour=12, minute=0, second=0, microsecond=0)
+        if "tomorrow" in lower:
+            return (now + dt.timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
+        if "afternoon" in lower:
+            base = now if "tomorrow" not in lower else now + dt.timedelta(days=1)
+            return base.replace(hour=15, minute=0, second=0, microsecond=0)
         try:
-            # 测试获取北京天气
-            results = await self.retrieve("北京天气", top_k=1)
-            return len(results) > 0
-        except Exception as e:
-            print(f"天气检索器健康检查失败: {e}")
-            return False
+            return dt.datetime.fromisoformat(at)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _get_tzinfo(tz_name: Optional[str]) -> Optional[dt.tzinfo]:
+        if not tz_name:
+            return None
+        try:
+            return ZoneInfo(tz_name)
+        except Exception:
+            return None
+
+
+__all__ = ["WeatherRetriever"]

@@ -1,163 +1,130 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-检索管理器 - 任务3
-统一管理所有检索器的调度中心
-"""
+"""Orchestrates all retrieval backends behind a single interface."""
 
-import asyncio
-from typing import Dict, List, Any, Optional
-from .retrievers.base_retriever import BaseRetriever
-from .retrievers.local_rag_retriever import LocalRAGRetriever
-from .retrievers.web_search_retriever import WebSearchRetriever
-from .retrievers.weather_retriever import WeatherRetriever
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+
+from config import Settings, get_settings
+from .retrievers.base_retriever import BaseRetriever, RetrievalResult
 from .retrievers.finance_retriever import FinanceRetriever
+from .retrievers.local_rag_retriever import LocalRAGRetriever
 from .retrievers.transport_retriever import TransportRetriever
+from .retrievers.weather_retriever import WeatherRetriever
+from .retrievers.web_search_retriever import WebSearchRetriever
+from .retrievers.yfinance_retriever import YFinanceRetriever
+from .retrievers.hko_flw_retriever import HKOLocalForecastRetriever
+from .retrievers.hko_warnsum_retriever import HKOWarnSumRetriever
+from .retrievers.hko_rhrread_retriever import HKORhrreadRetriever
+
+
+@dataclass(slots=True)
+class RetrievalRequest:
+    """Represents a single retrieval call for batch execution."""
+
+    retriever: str
+    query: str
+    kwargs: Dict[str, Any] = field(default_factory=dict)
 
 
 class RetrievalManager:
-    """检索管理器，统一管理所有检索器"""
+    """High-level facade exposing all retrievers via a unified API."""
 
-    def __init__(self):
-        """初始化检索管理器"""
-        self.retrievers: Dict[str, BaseRetriever] = {}
-        self._initialize_retrievers()
+    def __init__(
+        self,
+        settings: Optional[Settings] = None,
+        *,
+        auto_register_defaults: bool = True,
+    ) -> None:
+        self.settings = get_settings()
+        self.settings.ensure_directories()
 
-    def _initialize_retrievers(self):
-        """初始化所有检索器"""
-        self.retrievers = {
-            'local_rag': LocalRAGRetriever(),
-            'web_search': WebSearchRetriever(),
-            'weather': WeatherRetriever(),
-            'finance': FinanceRetriever(),
-            'transport': TransportRetriever()
-        }
+        self._retrievers: Dict[str, BaseRetriever] = {}
 
-    async def retrieve_from_single(self, query: str, retriever_name: str, top_k: int = 10) -> List[Dict[str, Any]]:
-        """
-        从单个检索器获取信息
+        if auto_register_defaults:
+            self.register_default_retrievers()
 
-        Args:
-            query: 查询内容
-            retriever_name: 检索器名称
-            top_k: 返回结果数量
+    def register_default_retrievers(self) -> None:
+        """Instantiate and register the default retrievers."""
+        self.register(LocalRAGRetriever(self.settings))
+        self.register(WebSearchRetriever(self.settings))
+        self.register(WeatherRetriever(self.settings))
+        self.register(FinanceRetriever(self.settings))
+        self.register(TransportRetriever(self.settings))
+        self.register(YFinanceRetriever(self.settings))
+        # self.register(AQHIRetriever(self.settings))
+        # self.register(TCHKOTrackRetriever(self.settings))
+        # self.register(TCHKOWarningRetriever(self.settings))
+        self.register(HKOLocalForecastRetriever(self.settings))
+        self.register(HKOWarnSumRetriever(self.settings))
+        self.register(HKORhrreadRetriever(self.settings))
 
-        Returns:
-            检索结果列表
-        """
-        if retriever_name not in self.retrievers:
-            raise ValueError(f"检索器不存在: {retriever_name}")
+    def register(self, retriever: BaseRetriever) -> None:
+        """Attach a retriever instance to the manager."""
+        self._retrievers[retriever.name] = retriever
 
-        retriever = self.retrievers[retriever_name]
+    def unregister(self, name: str) -> None:
+        """Remove a retriever if it exists (no-op when missing)."""
+        self._retrievers.pop(name, None)
+
+    def get_retriever(self, name: str) -> BaseRetriever:
+        """Return a retriever instance by name, raising with a helpful error message."""
         try:
-            results = await retriever.retrieve(query, top_k)
-            # 为结果添加来源标识
-            for result in results:
-                result['retriever'] = retriever_name
-            return results
-        except Exception as e:
-            print(f"检索器 {retriever_name} 出错: {e}")
-            return []
+            return self._retrievers[name]
+        except KeyError as error:
+            available = ", ".join(self._retrievers.keys()) or "none"
+            raise KeyError(f"Retriever '{name}' is not registered. Available: {available}") from error
 
-    async def retrieve_from_multiple(self, query: str, retrievers: List[str], top_k: int = 10) -> List[Dict[str, Any]]:
-        """
-        从多个检索器并行获取信息
+    def list_retrievers(self) -> List[str]:
+        """Get all registered retriever names for discovery/debugging."""
+        return sorted(self._retrievers.keys())
 
-        Args:
-            query: 查询内容
-            retrievers: 检索器名称列表
-            top_k: 每个检索器返回的结果数量
+    def has_retriever(self, name: str) -> bool:
+        """Check whether a retriever has already been registered."""
+        return name in self._retrievers
 
-        Returns:
-            合并后的检索结果列表
-        """
-        # 创建并行任务
-        tasks = []
-        for retriever_name in retrievers:
-            if retriever_name in self.retrievers:
-                task = self.retrieve_from_single(query, retriever_name, top_k)
-                tasks.append(task)
-            else:
-                print(f"警告: 检索器不存在 {retriever_name}")
+    def retrieve(self, name: str, query: str, **kwargs: Any) -> RetrievalResult:
+        """Invoke the named retriever with the given query and parameters."""
+        retriever = self.get_retriever(name)
+        return retriever.retrieve(query, **kwargs)
 
-        if not tasks:
-            return []
+    def retrieve_finance(
+        self,
+        symbol: str,
+        *,
+        provider: Optional[str] = None,
+        **kwargs: Any,
+    ) -> RetrievalResult:
+        """Run a financial lookup, defaulting to yfinance unless a provider is specified."""
+        import os
 
-        # 并行执行所有检索任务
-        results_list = await asyncio.gather(*tasks, return_exceptions=True)
+        name = provider or os.getenv("FINANCE_PROVIDER", "finance_yf")
+        return self.retrieve(name, symbol, **kwargs)
 
-        # 合并结果
-        all_results = []
-        for i, results in enumerate(results_list):
-            if isinstance(results, Exception):
-                print(f"检索任务 {i} 失败: {results}")
-                continue
-            all_results.extend(results)
+    def retrieve_batch(self, requests: Sequence[RetrievalRequest]) -> Dict[str, RetrievalResult]:
+        """Execute multiple retrievals and return a mapping keyed by retriever name."""
+        results: Dict[str, RetrievalResult] = {}
+        for request in requests:
+            result = self.retrieve(request.retriever, request.query, **request.kwargs)
+            results[request.retriever] = result
+        return results
 
-        return all_results
+    def retrieve_all(
+        self,
+        query: str,
+        *,
+        retrievers: Optional[Iterable[str]] = None,
+        kwargs_map: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    ) -> Dict[str, RetrievalResult]:
+        """Run the same query through multiple retrievers at once."""
+        names = retrievers or self._retrievers.keys()
+        results: Dict[str, RetrievalResult] = {}
+        for name in names:
+            extra_kwargs = dict(kwargs_map.get(name, {})) if kwargs_map else {}
+            results[name] = self.retrieve(name, query, **extra_kwargs)
+        return results
 
-    async def retrieve_with_fallback(self, query: str, primary_retrievers: List[str], fallback_retrievers: List[str],
-                                     top_k: int = 10) -> List[Dict[str, Any]]:
-        """
-        带降级策略的检索
 
-        Args:
-            query: 查询内容
-            primary_retrievers: 主要检索器列表
-            fallback_retrievers: 备用检索器列表
-            top_k: 返回结果数量
+__all__ = ["RetrievalManager", "RetrievalRequest"]
 
-        Returns:
-            检索结果列表
-        """
-        # 首先尝试主要检索器
-        results = await self.retrieve_from_multiple(query, primary_retrievers, top_k)
-
-        # 如果主要检索器结果不足，使用备用检索器
-        if len(results) < top_k // 2:
-            print("主要检索器结果不足，启用备用检索器")
-            fallback_results = await self.retrieve_from_multiple(query, fallback_retrievers, top_k)
-            results.extend(fallback_results)
-
-        return results[:top_k]
-
-    async def health_check(self) -> Dict[str, bool]:
-        """检查所有检索器的健康状态"""
-        health_status = {}
-
-        tasks = []
-        for name, retriever in self.retrievers.items():
-            task = retriever.health_check()
-            tasks.append((name, task))
-
-        for name, task in tasks:
-            try:
-                status = await task
-                health_status[name] = status
-            except Exception as e:
-                print(f"检索器 {name} 健康检查失败: {e}")
-                health_status[name] = False
-
-        return health_status
-
-    def get_retriever_info(self) -> Dict[str, Dict[str, Any]]:
-        """获取所有检索器的信息"""
-        info = {}
-        for name, retriever in self.retrievers.items():
-            info[name] = {
-                'name': name,
-                'description': getattr(retriever, 'description', ''),
-                'is_available': True  # 可以根据实际情况检查
-            }
-        return info
-
-    async def update_retriever_config(self, retriever_name: str, config: Dict[str, Any]):
-        """更新检索器配置"""
-        if retriever_name not in self.retrievers:
-            raise ValueError(f"检索器不存在: {retriever_name}")
-
-        retriever = self.retrievers[retriever_name]
-        if hasattr(retriever, 'update_config'):
-            await retriever.update_config(config)
-        else:
-            print(f"检索器 {retriever_name} 不支持配置更新")
+retrieval_manager = RetrievalManager(settings=get_settings())

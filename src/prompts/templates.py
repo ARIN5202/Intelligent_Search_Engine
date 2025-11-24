@@ -9,41 +9,73 @@ from typing import Dict, List, Any, Optional
 
 
 class PromptTemplates:
-    """Prompt模板管理器"""
+    """Prompt Templates Manager"""
 
     def __init__(self):
-        """初始化模板"""
+        """Initialize with predefined templates."""
         self.templates = {
-            # 路由相关模板
-            'routing': {
-                'analyze_query': """
-请分析以下用户查询，确定需要使用哪些检索工具来获取信息。
+            # Query analysis templates
+            'query_analysis': {
+                'intent_extraction': """
+Analyze the following user query to extract keywords, time-related keywords, domain area.
 
-可用工具:
-{available_tools}
+User Query: {query}
+Additional Context (if any): {context}
 
-用户查询: {query}
-
-请以JSON格式返回分析结果，包含:
-- selected_tools: 选中的工具列表
-- reasoning: 选择理由
-- confidence: 置信度(0-1)
-
-分析结果:
+{format_instructions}
+Important: For domain_area, if it can be handled by two or more domains, choose the most relevant one (e.g., Typhone Signal No.8 -> pick typhone).
 """,
 
-                'tool_selection': """
-基于查询内容，选择最合适的检索工具：
+                'query_rewriting': """
+Rewrite the following query to make it more effective for information retrieval.
+Maintain the original intent but make it more specific, clear, and search-friendly.
 
-查询: {query}
-上下文: {context}
+Important: If query is time-sensitive, keep original time-related word in the rewritten query (e.g, today, tomorrow, next Monday, current, latest)!!
 
-可选工具: {tools}
+Original query: {query}
+Additional context (if any, e.g., attachments): {context}
 
-请选择最相关的1-3个工具，并说明理由。
+Rewritten query:
 """
             },
 
+            # Routing templates
+            'routing': {
+                'tool_selection': """
+You are an intelligent routing agent responsible for selecting an extra specialized retriever can be combined with web search for processing a user query. 
+Analyze the query and its metadata carefully to decide the most appropriate retriever. 
+The specialized retriever may not directly answer the query but can provide additional information or context to improve the web search process.
+
+### Input Details:
+- Rewritten Query: {rewritten_query}
+- Keywords: {keywords}
+- Domain Area: {domain_area}
+
+### Available Tools:
+{tool_descriptions}
+
+{format_instructions}
+""",
+                "retrieval_metadata": """
+You are an intelligent assistant tasked with extracting specific metadata from a user query. 
+Your goal is to ensure the extracted metadata matches the required parameter format for the selected tool.
+Carefully analyze the user query and time-related keywords.
+
+### Input Details:
+- Selected Tool: {tool_name}
+- User Query: {query}
+- Time-Related Keywords: {time_related}
+
+### Tool-Specific Metadata Requirements:
+1. Finance: Extract the ticker symbol(s) (e.g., "AAPL, TSLA"), period (e.g. "5d", "1mo", "1y") or start and end date in ISO 8601 format (e.g., 2023-01-01) if mentioned.
+2. Weather: Extract the location (e.g., "New York"), mode (One of ["current", "hourly", "daily"]), target time (e.g., "2025-11-23", "tomorrow", "today afternoon") if mentioned.
+3. HKO_WarnSum: No specific metadata extraction required.
+3. Transport: Extract the origin (e.g., "Central Station"), destination (e.g., "Airport"), and transit mode (One of ["driving", "walking", "bicycling", "transit"]).
+
+{format_instructions}
+"""
+            },
+            
             # 答案合成模板
             'synthesis': {
                 'basic_qa': """

@@ -1,168 +1,107 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-本地RAG检索器
-从本地知识库中检索相关信息
+"""Retriever powered by a persisted LlamaIndex vector index.
+
+本实现从 ``Settings.llama_index_dir`` 加载已持久化的 LlamaIndex 索引，
+并通过内置的 retriever 进行相似度检索，返回标准化的 RetrievedDocument。
+索引需要先由 ``scripts/build_rag_index.py`` 构建并持久化。
 """
 
-import asyncio
+from __future__ import annotations
+
+from __future__ import annotations
+
 from pathlib import Path
-from typing import List, Dict, Any
-from .base_retriever import BaseRetriever
+from threading import Lock
+from typing import Any, Dict, List, Optional, Tuple
+
+from config import Settings
+from .base_retriever import BaseRetriever, RetrievedDocument
 
 
 class LocalRAGRetriever(BaseRetriever):
-    """本地RAG检索器"""
+    """基于 LlamaIndex 的本地语义检索。"""
+    domain = [
+        "local_rag",
+        "Sereleia", "Althaven", "Morrigna", "Whispering Revolution",
+        "Aetherian Dynamics", "Aris Thorne", "Chrono-Weave", "Synapse", "Gaia AI",
+        "Xylos", "Kepler-186", "Luminoids", "Crystalline Forests", "Auralight",
+        "Elara Vance", "Vance Protocol", "Deep Reach Observatory",
+        "Great Digital Awakening", "Three Silent Days", "Pillars", "Digital Compact",
+        "fiction", "科幻", "science fiction"
+    ]
 
-    def __init__(self):
-        super().__init__("LocalRAG")
-        self.description = "本地知识库检索器，搜索公司内部文档和规章制度"
-        self.index_path = Path(__file__).parent.parent.parent.parent / "storage"
-        self.documents = []  # 简单存储，实际应该使用向量数据库
+    description = (
+        "Used for querying the local fictional knowledge base (a science fiction novel)."
+        "When the question contains proper nouns (such as 'Sereleia', 'Aetherian Dynamics', 'Xylos planet ', 'Dr. Elara Vance' or 'Great Digital Awakening'),"
+        "This tool must be given priority."
+    )
 
-    async def _do_initialize(self):
-        """初始化本地索引"""
-        # TODO: 在实际项目中这里应该加载向量索引
-        # 例如: FAISS, ChromaDB, 或其他向量数据库
+    def __init__(self, settings: Settings, *, persist_dir: Optional[Path | str] = None) -> None:
+        """Initialise retriever with project settings and optional custom index directory."""
+        super().__init__(name="local_rag", settings=settings)
+        self._persist_dir = Path(persist_dir) if persist_dir else settings.llama_index_dir
+        self._index = None
+        self._lock = Lock()
 
-        # 模拟加载本地文档
-        await self._load_local_documents()
-        print(f"本地RAG检索器初始化完成，加载了 {len(self.documents)} 个文档")
+    def _retrieve(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        **_: Any,
+    ) -> Tuple[List[RetrievedDocument], Dict[str, Any]]:
+        """Run a semantic search query against the persisted LlamaIndex store."""
+        index = self._ensure_index()
 
-    async def _load_local_documents(self):
-        """加载本地文档（模拟实现）"""
-        # 这里是模拟数据，实际应该从存储的向量索引中加载
-        self.documents = [
-            {
-                'content': '员工应准时上班，迟到超过30分钟视为旷工。请假需要提前一天申请，紧急情况除外。',
-                'title': '考勤制度',
-                'source': 'company_rules.txt',
-                'type': 'policy'
-            },
-            {
-                'content': '报销需要提供正规发票。超过500元的支出需要经理审批。月度预算不得超支20%。',
-                'title': '财务制度',
-                'source': 'company_rules.txt',
-                'type': 'finance'
-            },
-            {
-                'content': '保持工作环境整洁。禁止在办公区域吸烟。下班前需要整理好个人工作台。',
-                'title': '工作规范',
-                'source': 'company_rules.txt',
-                'type': 'workplace'
-            }
-        ]
+        # Lazy import to avoid importing LlamaIndex unless needed
+        from llama_index.core import QueryBundle
 
-    async def retrieve(self, query: str, top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
-        """
-        从本地知识库检索相关信息
+        retriever = index.as_retriever(similarity_top_k=top_k)
+        results = retriever.retrieve(QueryBundle(query))
 
-        Args:
-            query: 查询内容
-            top_k: 返回结果数量
+        documents: List[RetrievedDocument] = []
+        for i, node_with_score in enumerate(results, start=1):
+            node = getattr(node_with_score, "node", None) or getattr(node_with_score, "text_node", None)
+            score = float(getattr(node_with_score, "score", 1.0 / i) or 1.0 / i)
+            if node is None:
+                continue
 
-        Returns:
-            检索结果列表
-        """
-        if not self.is_initialized:
-            await self.initialize()
+            content = node.get_content() if hasattr(node, "get_content") else str(getattr(node, "text", ""))
+            metadata = dict(getattr(node, "metadata", {}) or {})
+            source = metadata.get("source") or metadata.get("file_path") or metadata.get("doc_id") or "llama"
 
-        # 提取查询关键词
-        keywords = self._extract_keywords(query)
-
-        # 计算相关性分数
-        scored_docs = []
-        for doc in self.documents:
-            score = self._calculate_similarity(query, keywords, doc)
-            if score > 0:
-                scored_docs.append((score, doc))
-
-        # 按分数排序
-        scored_docs.sort(key=lambda x: x[0], reverse=True)
-
-        # 格式化结果
-        results = []
-        for score, doc in scored_docs[:top_k]:
-            result = self._format_result(
-                content=doc['content'],
-                title=doc['title'],
-                source=doc['source'],
-                score=score,
-                metadata={
-                    'type': doc.get('type', 'unknown'),
-                    'retrieval_method': 'local_rag'
-                }
+            documents.append(
+                RetrievedDocument(
+                    content=content,
+                    source=str(source),
+                    score=score,
+                    metadata=metadata,
+                )
             )
-            results.append(result)
 
-        return results
-
-    def _calculate_similarity(self, query: str, keywords: List[str], document: Dict[str, Any]) -> float:
-        """
-        计算查询与文档的相似度
-
-        Args:
-            query: 原始查询
-            keywords: 提取的关键词
-            document: 文档
-
-        Returns:
-            相似度分数 (0-1)
-        """
-        doc_text = (document['content'] + ' ' + document['title']).lower()
-        query_lower = query.lower()
-
-        # 精确匹配得分
-        exact_match_score = 0
-        if query_lower in doc_text:
-            exact_match_score = 0.5
-
-        # 关键词匹配得分
-        keyword_matches = 0
-        for keyword in keywords:
-            if keyword in doc_text:
-                keyword_matches += 1
-
-        keyword_score = keyword_matches / len(keywords) if keywords else 0
-
-        # 类型相关性得分
-        type_score = 0
-        doc_type = document.get('type', '')
-        if any(t in query_lower for t in ['考勤', '上班', '请假']) and doc_type == 'policy':
-            type_score = 0.2
-        elif any(t in query_lower for t in ['报销', '财务', '预算']) and doc_type == 'finance':
-            type_score = 0.2
-        elif any(t in query_lower for t in ['工作', '办公', '环境']) and doc_type == 'workplace':
-            type_score = 0.2
-
-        # 综合得分
-        total_score = exact_match_score + keyword_score * 0.4 + type_score
-        return min(1.0, total_score)
-
-    async def health_check(self) -> bool:
-        """健康检查"""
-        try:
-            if not self.is_initialized:
-                await self.initialize()
-
-            # 测试简单查询
-            results = await self.retrieve("测试查询", top_k=1)
-            return True
-        except Exception as e:
-            print(f"本地RAG检索器健康检查失败: {e}")
-            return False
-
-    async def add_document(self, content: str, title: str, source: str, doc_type: str = "unknown"):
-        """添加新文档到本地知识库"""
-        new_doc = {
-            'content': content,
-            'title': title,
-            'source': source,
-            'type': doc_type
+        meta = {
+            "persist_dir": str(self._persist_dir),
         }
-        self.documents.append(new_doc)
-        print(f"已添加新文档: {title}")
+        return documents, meta
 
-    async def get_document_count(self) -> int:
-        """获取文档数量"""
-        return len(self.documents)
+    def _ensure_index(self):
+        """Load and cache the LlamaIndex instance from disk."""
+        with self._lock:
+            if self._index is not None:
+                return self._index
+
+            if not self._persist_dir.exists():
+                raise FileNotFoundError(
+                    f"LlamaIndex persist dir not found: {self._persist_dir}. "
+                    "Please run scripts/build_rag_index.py first."
+                )
+
+            from llama_index.core import StorageContext, load_index_from_storage
+            from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+
+            storage_context = StorageContext.from_defaults(persist_dir=str(self._persist_dir))
+            embed_model = HuggingFaceEmbedding(model_name=self.settings.llama_embedding_model)
+            self._index = load_index_from_storage(storage_context=storage_context, embed_model=embed_model)
+            return self._index
+
+
+__all__ = ["LocalRAGRetriever"]

@@ -30,7 +30,8 @@ Important: For domain_area, if it can be handled by two or more domains, choose 
 Rewrite the following query to make it more effective for information retrieval.
 Maintain the original intent but make it more specific, clear, and search-friendly.
 
-Important: If query is time-sensitive, keep original time-related word in the rewritten query (e.g, today, tomorrow, next Monday, current, latest)!!
+Important:
+The current date is {current_date}. Pls update any time-related references in the query to exact dates based on this current date.
 
 Original query: {query}
 Additional context (if any, e.g., attachments): {context}

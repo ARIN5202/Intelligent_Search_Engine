@@ -66,7 +66,7 @@ class AIAgent:
                             destination=retrieval_metadata.get("destination", None),
                             mode=retrieval_metadata.get("transit_mode", 'transit'),
                             top_k=10,
-                        ))      
+                        ))
                     elif specialized_tool == "finance":
                         for ticker in retrieval_metadata["ticker_symbols"]:
                             # if in shenzhen, add these
@@ -84,13 +84,13 @@ class AIAgent:
                                 top_k=10,
                             ))
                         if tool_retrievals:
-                            k = 3    
+                            k = 3
                     elif specialized_tool == "weather":
                         tool_retrievals.append(self.retrieval_manager.retrieve(
                             name="weather",
                             query=query,
                             location=retrieval_metadata.get("location", None),
-                            mode=retrieval_metadata.get("mode", "daily"),   
+                            mode=retrieval_metadata.get("mode", "daily"),
                             at=retrieval_metadata.get("target_time", None),
                             top_k=10,
                         ))
@@ -116,13 +116,13 @@ class AIAgent:
                 except Exception as e:
                     print(f"  - No available relevant documents using specialized '{specialized_tool}' retriever")
                     skip_web_search = False
-            
+
             # Always call web search as fallback unless skipped
             if not skip_web_search:
                 # Call web search retriever as the base
                 retrieval_results = self.retrieval_manager.retrieve(
                     name="web_search",
-                    query=query,
+                    query=query+"FYI: The current date is "+time.strftime("%Y-%m-%d")+".",
                     top_k=k,
                 )
                 for retrieval in tool_retrievals:
@@ -132,8 +132,8 @@ class AIAgent:
                 else:
                     final_usage = ', '.join(selected_tools)
                 print(
-                f"  - Retrieved {len(retrieval_results.documents)} documents "
-                f"using '{final_usage}' retriever(s)"
+                    f"  - Retrieved {len(retrieval_results.documents)} documents "
+                    f"using '{final_usage}' retriever(s)"
                 )
             else:
                 if retrieval_results is None:
@@ -142,8 +142,8 @@ class AIAgent:
                         retrieval_results.documents.extend(retrieval.documents)
                 final_usage = specialized_tool
                 print(
-                f"  - Retrieved {len(retrieval_results.documents)} documents "
-                f"using '{final_usage}' retriever(s)"
+                    f"  - Retrieved {len(retrieval_results.documents)} documents "
+                    f"using '{final_usage}' retriever(s)"
                 )
 
             # Step 4: rerank the retrieved documents
@@ -185,7 +185,7 @@ class AIAgent:
             print("🚀 Starting Query Processing Pipeline")
             print("=" * 80)
             start_time = time.time()
-            
+
             # Extract query and context (parsed by pre-processing step)
             raw_query = user_input["raw_query"]
             query = user_input.get("processed_query", "")
@@ -195,11 +195,12 @@ class AIAgent:
             # Process attachments if provided
             if attachments:
                 attachment_contents = [att.get("content", "") for att in attachments if att.get("content")]
-                image_paths = [att.get("path", "") for att in attachments if att.get("type") == "image" and att.get("path")]
+                image_paths = [att.get("path", "") for att in attachments if
+                               att.get("type") == "image" and att.get("path")]
             else:
                 attachment_contents = []
                 image_paths = []
-           
+
             print("\n📥 **Input Details:**")
             print(f"  - Raw Query: {raw_query}")
             print(f"  - Number of Attachments: {len(attachments)}")
@@ -214,7 +215,8 @@ class AIAgent:
             analysis_results = self.query_analyzer.analyze(query=raw_query, attachment_contents=attachment_contents)
             print(f"  - Rewritten Query: {analysis_results['rewritten_query']}")
             print(f"  - Keywords: {', '.join(analysis_results['keywords'])}")
-            print(f"  - Time Related: {', '.join(analysis_results['time_related']) if analysis_results['time_related'] else 'None'}")
+            print(
+                f"  - Time Related: {', '.join(analysis_results['time_related']) if analysis_results['time_related'] else 'None'}")
             print(f"  - Domain Area: {analysis_results['domain_area']}")
 
             print("\n⏱️ **Processing Time:**")
@@ -225,7 +227,8 @@ class AIAgent:
             print("\n🔀 **Step 2: Routing**")
             routing_start = time.time()
             routing_results = self.router.route(analysis_results)
-            routing_results["selected_tools"].append("web_search")  # Always include web search as a fallback
+            if "web_search" not in routing_results["selected_tools"]:
+                routing_results["selected_tools"].append("web_search")  # Always include web search as a fallback
             print(f"  - Routing to: {', '.join(routing_results['selected_tools'])} retriever(s)")
             print(f"  - Reasoning: {routing_results['reasoning']}")
             print(f"  - Retriever Metadata: {routing_results['retrieval_metadata']}")
@@ -244,6 +247,8 @@ class AIAgent:
             print(f"  - Retrieval & Reranking Time: {time.time() - retrieval_start:.2f}s")
             print("=" * 80)
 
+            final_time = time.time() - analysis_start
+
             # Step 5: Synthesize final answer with rewritten query and reranked contexts
             synthesis_start = time.time()
             final_answer = self.synthesizer.synthesize(
@@ -253,13 +258,14 @@ class AIAgent:
             )
 
             print("\n✏️ **Step 5: Answer Synthesis**")
+
             print(f"  - Synthesis Time: {time.time() - synthesis_start:.2f}s")
 
             # Convert contexts to CLI-friendly sources list
             sources = final_answer.to_sources()
 
             print(f"✏️ Generated answer with {len(sources)} sources")
-            print(f"⏱️ **Total Time:** {time.time() - start_time:.2f} seconds")
+            print(f"⏱️ **Total Time (Subtracting From Synthesis):** {final_time:.2f} seconds")
             print("=" * 80)
 
             return {
@@ -278,7 +284,7 @@ class AIAgent:
             #     'retrieval_count': len(retrieval_results),
             #     'reranked_count': len(reranked_results)
             # }
-    
+
         except Exception as e:
             print(f"❌ Error during query processing: {e}")
             return {

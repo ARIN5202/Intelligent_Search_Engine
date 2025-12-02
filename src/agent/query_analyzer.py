@@ -53,6 +53,12 @@ def parse_time_info(times: List[str]) -> List[Optional[str]]:
                 parsed_date = datetime.datetime.now()
             elif time.lower() == "tomorrow":
                 parsed_date = datetime.datetime.now() + datetime.timedelta(days=1)
+            elif time.lower() == "yesterday":
+                parsed_date = datetime.datetime.now() - datetime.timedelta(days=1)
+            elif time.lower() == "last year":
+                parsed_date = datetime.datetime.now() - datetime.timedelta(days=365)
+            elif time.lower() == "next year":
+                parsed_date = datetime.datetime.now() + datetime.timedelta(days=365)
             else:
                 parsed_date = dparser.parse(time, fuzzy=True)
             formatted_date = parsed_date.strftime("%Y-%m-%d")
@@ -97,7 +103,8 @@ class QueryRewriter:
             rewritten_query = self.rewrite_chain.invoke(
                 {
                 "query": query,
-                "context": "\n".join(attachment_contents) if attachment_contents else ""
+                "context": "\n".join(attachment_contents) if attachment_contents else "",
+                "current_date": datetime.datetime.now().strftime("%Y-%m-%d")
                 }
             )
             return rewritten_query

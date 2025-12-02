@@ -230,14 +230,12 @@ class Synthesizer:
         if detected_language == "zh":
             lang_instruction = (
                 "請使用流暢、專業的繁體中文回答。\n"
-                "引用事實時請在句尾標註來源 [x]。\n"
                 "如果文件中沒有直接答案，請根據你的常識對該主題進行一般性說明。\n"
                 "**重要：用戶提到的'今天'、'週三'等相對時間，必須根據當前日期進行換算。**"
             )
         else:
             lang_instruction = (
                 "Please answer in fluent, professional English.\n"
-                "Cite sources at the end of sentences like [x].\n"
                 "If the specific answer is not in the docs, provide a general explanation.\n"
                 "**Important: Resolve relative time terms (e.g., 'today', 'Wednesday') based on Current Date.**"
             )

@@ -32,41 +32,8 @@ llm = AzureChatOpenAI(
 class QueryOutput(BaseModel):
     """Schema for query analysis output"""
     keywords: List[str] = Field(description="Key terms extracted from the query")
-    time_related: List[str] = Field(description="Time-related keywords extracted from the query (e.g., today, next Monday, current, latest), if query is time-sensitive")
+    time_related: List[str] = Field(description="Time-related keywords or exact dates extracted from the query, if query is time-sensitive")
     domain_area: str = Field(description="The Most relevant domain area for this query (e.g., finance, typhone, weather, transport, general)")
-
-# Helper function to parse relative dates
-def parse_time_info(times: List[str]) -> List[Optional[str]]:
-    """
-    Convert a list of relative date expressions (e.g., 'next Monday') to specific dates.
-
-    Args:
-        times: List of relative date expressions.
-
-    Returns:
-        A list of strings representing the exact dates in ISO format (YYYY-MM-DD), or None if parsing fails.
-    """
-    parsed_dates = []
-    for time in times:
-        try:
-            if time.lower() in ["today", "tonight", "this evening", "this afternoon", "this morning", "current", "now", "latest"]:
-                parsed_date = datetime.datetime.now()
-            elif time.lower() == "tomorrow":
-                parsed_date = datetime.datetime.now() + datetime.timedelta(days=1)
-            elif time.lower() == "yesterday":
-                parsed_date = datetime.datetime.now() - datetime.timedelta(days=1)
-            elif time.lower() == "last year":
-                parsed_date = datetime.datetime.now() - datetime.timedelta(days=365)
-            elif time.lower() == "next year":
-                parsed_date = datetime.datetime.now() + datetime.timedelta(days=365)
-            else:
-                parsed_date = dparser.parse(time, fuzzy=True)
-            formatted_date = parsed_date.strftime("%Y-%m-%d")
-            parsed_dates.append(formatted_date)
-        except Exception:
-            parsed_dates.append(None)
-    return parsed_dates
-        
 
 class QueryRewriter:
     """Component to rewrite queries for better analysis and retrieval"""
@@ -162,15 +129,12 @@ class IntentExtractor:
                 }
             )
 
-            # Parse the time-related keywords into exact dates or None
-            analysis_result.time_related = parse_time_info(analysis_result.time_related)
-
             # Return enhanced query and metadata
             return {
                 "original_query": '',
                 "rewritten_query": query,
                 "keywords": analysis_result.keywords,
-                "time_related": [date for date in analysis_result.time_related if date is not None],  # Filter out None values
+                "time_related": analysis_result.time_related,
                 "domain_area": analysis_result.domain_area,
             }
 
@@ -196,7 +160,7 @@ class QueryAnalyzer:
 
     def analyze(self, query: str, attachment_contents:list, use_attachments=True) -> Dict[str, Any]:
         """
-        Complete query analysis pipeline: rewriting, intent analysis.
+        Complete query analysis pipeline: rewrite the query and extract intent informatuion
         
         Args:
             query: Original user query

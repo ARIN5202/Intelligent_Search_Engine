@@ -47,7 +47,7 @@ class AIAgent:
 
         try:
             selected_tools = routing_results["selected_tools"]
-            retrieval_metadata = routing_results.get("retrieval_metadata", {})  # 防御性一点
+            retrieval_metadata = routing_results.get("retrieval_metadata", {})
             retrieval_results = None
             skip_web_search = False
             k = 10  # Default top_k for web search
@@ -69,11 +69,6 @@ class AIAgent:
                         ))
                     elif specialized_tool == "finance":
                         for ticker in retrieval_metadata["ticker_symbols"]:
-                            # if in shenzhen, add these
-                            # import os
-                            # proxy = 'http://127.0.0.1:7890'
-                            # os.environ['HTTP_PROXY'] = proxy
-                            # os.environ['HTTPS_PROXY'] = proxy
                             tool_retrievals.append(self.retrieval_manager.retrieve(
                                 name="finance_yf",
                                 query=query,
@@ -122,7 +117,7 @@ class AIAgent:
                 # Call web search retriever as the base
                 retrieval_results = self.retrieval_manager.retrieve(
                     name="web_search",
-                    query=query+"FYI: The current date is "+time.strftime("%Y-%m-%d")+".",
+                    query=query,
                     top_k=k,
                 )
                 for retrieval in tool_retrievals:
@@ -184,7 +179,6 @@ class AIAgent:
             print("\n" + "=" * 80)
             print("🚀 Starting Query Processing Pipeline")
             print("=" * 80)
-            start_time = time.time()
 
             # Extract query and context (parsed by pre-processing step)
             raw_query = user_input["raw_query"]
@@ -216,7 +210,8 @@ class AIAgent:
             print(f"  - Rewritten Query: {analysis_results['rewritten_query']}")
             print(f"  - Keywords: {', '.join(analysis_results['keywords'])}")
             print(
-                f"  - Time Related: {', '.join(analysis_results['time_related']) if analysis_results['time_related'] else 'None'}")
+                  f"  - Time Related: {', '.join(analysis_results['time_related']) if analysis_results['time_related'] else 'None'}"
+                 )
             print(f"  - Domain Area: {analysis_results['domain_area']}")
 
             print("\n⏱️ **Processing Time:**")

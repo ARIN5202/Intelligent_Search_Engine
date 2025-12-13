@@ -16,7 +16,6 @@ import argparse
 import textwrap
 import sys
 import time
-from utils.handler import AttachmentHandler
 from config import get_settings
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # 添加项目根目录到路径
@@ -93,14 +92,7 @@ class IntelligentAgentApp:
                 "attachment_issues": [i.model_dump() for i in preprocess_result.issues],
             }
 
-            if user_input["attachments"]:
-                self.agent.run(user_input)
-                return await self.handler.process(
-                    query=user_input["raw_query"],
-                    attachments=user_input["attachments"]
-                )
-            else:
-                result = self.agent.run(user_input)
+            result = self.agent.run(user_input)
 
             # 5) 把预处理的 issues 回填到返回值，方便 CLI 打印/上层可见
             result.setdefault("preprocess", {})

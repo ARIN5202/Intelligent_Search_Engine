@@ -35,10 +35,7 @@ class RoutingOutput(BaseModel):
     selected_tool: Optional[str] = Field(
         description="The name of the selected tool. If no tool is selected, this will be null."
     )
-    description: Optional[str] = Field(
-        description="A brief description of the selected tool. If no tool is selected, this will be null."
-    )
-    reasoning: str = Field(description="Overall reasoning for the tool selection for using with web search.")
+    reasoning: Optional[str] = Field(description="One sentence of reasoning for the tool selection.")
 
 class RetrievalMetadataOutput(BaseModel):
     """Schema for retrieval metadata output"""
@@ -171,7 +168,6 @@ class Router:
                     if any(term in tool_domains for term in query_terms):
                         best_tool = tool_name
                         reasoning = f"Exact Word Match found for tool '{best_tool}'."
-
                         retrieval_metadata = self._extract_retrieval_metadata(
                             retriever_name=best_tool,
                             query=query,
@@ -191,7 +187,7 @@ class Router:
                             "domain_area": query_domain,
                         }
                     )
-
+                    
                     # Validate the routing results
                     if routing_result.selected_tool:
                         best_tool = routing_result.selected_tool
@@ -200,7 +196,8 @@ class Router:
                             query=query,
                             time_related=query_time_related  # Pass time-related info
                         )
-                        reasoning = routing_result.reasoning
+                        reasoning = f"LLM-based Match found for tool '{best_tool}'."
+                        reasoning = reasoning + " " + routing_result.reasoning
             
             if not best_tool:
                 best_tool = None

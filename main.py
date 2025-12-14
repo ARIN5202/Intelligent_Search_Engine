@@ -42,7 +42,7 @@ class IntelligentAgentApp:
         self.preproc = Preprocessor(ocr_lang="eng+chi_sim")
         self.is_running = False
         api_key = settings.api_key
-        self.handler = AttachmentHandler()
+        # self.handler = AttachmentHandler()
 
     async def start(self):
         """启动应用程序"""

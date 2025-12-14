@@ -15,6 +15,7 @@ from .synthesizer import Synthesizer
 from ..retrieval.manager import retrieval_manager
 from config import get_settings
 from .reranker import RerankResult
+from sentence_transformers import SentenceTransformer, util
 
 settings = get_settings()
 
@@ -29,6 +30,7 @@ class AIAgent:
         self.retrieval_manager = retrieval_manager
         self.reranker = Reranker()
         self.synthesizer = Synthesizer(deployment_name="gpt-4o")
+        self.evaluator = SentenceTransformer("all-MiniLM-L6-v2")
 
     def _retrieve_documents(
             self,
@@ -161,7 +163,19 @@ class AIAgent:
                 query=query,
                 contexts=[],  # 空上下文
             )
-
+    
+    def _calculate_relevance(self, raw_query, attachment_contents, final_output):
+        # Combine raw query and attachment content
+        user_input_context = raw_query + " " + " ".join(attachment_contents)
+        
+        # Encode the input context and final output
+        embeddings = self.evaluator.encode([user_input_context, final_output], convert_to_tensor=True, normalize_embeddings=True)
+        
+        # Calculate cosine similarity
+        similarity_score = util.cos_sim(embeddings[0], embeddings[1]).item()
+        
+        return similarity_score
+            
     def run(self, user_input: Dict[str, Any]) -> Any:
         """
         Orchestrate the  pipeline
@@ -253,14 +267,21 @@ class AIAgent:
             )
 
             print("\n✏️ **Step 5: Answer Synthesis**")
-
             print(f"  - Synthesis Time: {time.time() - synthesis_start:.2f}s")
-
             # Convert contexts to CLI-friendly sources list
             sources = final_answer.to_sources()
+            print(f"  - Generated answer with {len(sources)} sources")
 
-            print(f"✏️ Generated answer with {len(sources)} sources")
-            print(f"⏱️ **Total Time (Subtracting From Synthesis):** {final_time:.2f} seconds")
+            print("=" * 80)
+            print("\n🔗 **Final Metrics:**")
+            # Calculate relevance score
+            relevance_score = self._calculate_relevance(
+                raw_query=raw_query,
+                attachment_contents=attachment_contents,
+                final_output=final_answer.answer
+            )
+            print(f"  - Total Time (Subtracting From Synthesis): {final_time:.2f} seconds")
+            print(f"  - Relevance Score: {relevance_score:.4f}")
             print("=" * 80)
 
             return {
